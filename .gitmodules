@@ -1,0 +1,3 @@
+[submodule "tauri-executor"]
+	path = tauri-executor
+	url = https://github.com/cmndcntrlcyber/tauri-executor.git
