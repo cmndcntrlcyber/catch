@@ -1,0 +1,53 @@
+MIT License
+
+Copyright (c) 2025 Universal Web Application Security Research Framework
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+ADDITIONAL TERMS AND CONDITIONS FOR SECURITY RESEARCH SOFTWARE:
+
+1. AUTHORIZED USE ONLY: This software is intended solely for authorized security 
+   research, penetration testing with explicit written permission, educational 
+   purposes on owned systems, and legitimate security awareness activities.
+
+2. PROHIBITED USES: This software SHALL NOT be used for:
+   - Unauthorized access to computer systems or networks
+   - Malicious activities or cybercrimes
+   - Privacy violations or unauthorized data collection
+   - Any illegal activities under applicable laws
+   - Violation of terms of service of third-party systems
+
+3. USER RESPONSIBILITY: Users are solely responsible for:
+   - Ensuring compliance with all applicable laws and regulations
+   - Obtaining proper authorization before testing any systems
+   - Following responsible disclosure practices
+   - Respecting privacy and data protection requirements
+
+4. DISCLAIMER OF LIABILITY: The authors and contributors of this software 
+   disclaim any liability for misuse, illegal activities, or damages resulting 
+   from the use of this software. Users assume all risks and legal 
+   responsibilities for their use of this software.
+
+5. EDUCATIONAL PURPOSE: This software is provided for educational and research 
+   purposes to help security professionals understand browser fingerprinting 
+   techniques and improve defensive security measures.
+
+BY USING THIS SOFTWARE, YOU ACKNOWLEDGE THAT YOU HAVE READ, UNDERSTOOD, AND 
+AGREE TO COMPLY WITH THESE TERMS AND CONDITIONS. IF YOU DO NOT AGREE TO THESE 
+TERMS, DO NOT USE THIS SOFTWARE.

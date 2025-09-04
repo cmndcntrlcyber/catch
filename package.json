@@ -1,0 +1,76 @@
+{
+  "name": "universal-web-security-framework",
+  "version": "1.0.0",
+  "description": "A comprehensive browser fingerprinting and data collection framework designed for authorized security research, penetration testing, and security awareness demonstrations.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "NODE_ENV=development PORT=8080 node server.js",
+    "prod": "NODE_ENV=production node server.js",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "lint": "echo \"No linting configured yet\"",
+    "logs": "tail -f access.log"
+  },
+  "keywords": [
+    "security",
+    "penetration-testing",
+    "browser-fingerprinting",
+    "web-security",
+    "security-research",
+    "data-collection",
+    "red-team",
+    "cybersecurity",
+    "fingerprinting",
+    "reconnaissance"
+  ],
+  "author": "Security Research Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/your-username/universal-web-security-framework.git"
+  },
+  "bugs": {
+    "url": "https://github.com/your-username/universal-web-security-framework/issues"
+  },
+  "homepage": "https://github.com/your-username/universal-web-security-framework#readme",
+  "engines": {
+    "node": ">=14.0.0"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "dependencies": {
+    "dotenv": "^16.3.1"
+  },
+  "devDependencies": {},
+  "optionalDependencies": {},
+  "peerDependencies": {},
+  "bundledDependencies": [],
+  "files": [
+    "server.js",
+    "index.html",
+    "js/",
+    "implementation-guide.md",
+    "README.md",
+    "LICENSE",
+    "SECURITY.md",
+    "config.js",
+    ".env.example"
+  ],
+  "config": {
+    "port": "8080",
+    "https_port": "443",
+    "http_port": "80"
+  },
+  "funding": {
+    "type": "individual",
+    "url": "https://github.com/sponsors/your-username"
+  },
+  "private": false,
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  }
+}
