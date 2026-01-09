@@ -1,0 +1,24 @@
+# Sudoers configuration for SSL certificate renewal script
+#
+# This file allows the cmndcntrl user to run the SSL renewal script with sudo
+# without requiring a password prompt, which is necessary for cron automation.
+#
+# INSTALLATION INSTRUCTIONS:
+# 1. Review this file carefully for security
+# 2. Copy to sudoers.d directory with proper permissions:
+#    sudo cp sudoers-ssl-renewal /etc/sudoers.d/catch-ssl-renewal
+# 3. Set correct permissions:
+#    sudo chmod 440 /etc/sudoers.d/catch-ssl-renewal
+# 4. Validate syntax:
+#    sudo visudo -c -f /etc/sudoers.d/catch-ssl-renewal
+#
+# SECURITY NOTE:
+# This configuration is safe because:
+# - It only allows running ONE specific script
+# - The script path is absolute and cannot be changed
+# - The script is owned by root and cannot be modified without sudo
+# - No parameters can be passed to modify behavior
+#
+
+# Allow cmndcntrl user to run the SSL renewal script without password
+cmndcntrl ALL=(ALL) NOPASSWD: /home/cmndcntrl/code/catch/renew-ssl-certs.sh

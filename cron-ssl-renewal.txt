@@ -1,0 +1,28 @@
+# SSL Certificate Renewal Cron Job for Catch Framework
+#
+# This cron job runs daily at 3:00 AM to check for renewed Let's Encrypt certificates
+# and automatically copy them to the application directory.
+#
+# Let's Encrypt's certbot typically runs renewal checks twice daily at random times,
+# so we run our script once daily after the typical certbot renewal window.
+#
+# Installation Instructions:
+# 1. Review this file to ensure paths are correct
+# 2. Install with: crontab cron-ssl-renewal.txt
+# 3. Verify with: crontab -l
+#
+# To add this to your existing crontab instead of replacing it:
+# 1. crontab -l > current_crontab.txt
+# 2. cat cron-ssl-renewal.txt >> current_crontab.txt
+# 3. crontab current_crontab.txt
+#
+
+# Run SSL certificate renewal script daily at 3:00 AM
+# Format: minute hour day month weekday command
+0 3 * * * sudo /home/cmndcntrl/code/catch/renew-ssl-certs.sh >> /home/cmndcntrl/code/catch/ssl-renewal.log 2>&1
+
+# Alternative: Run every 12 hours (at 3:00 AM and 3:00 PM) for more frequent checks
+# 0 3,15 * * * sudo /home/cmndcntrl/code/catch/renew-ssl-certs.sh >> /home/cmndcntrl/code/catch/ssl-renewal.log 2>&1
+
+# Alternative: Run weekly on Monday at 3:00 AM (less frequent, but sufficient for 90-day certs)
+# 0 3 * * 1 sudo /home/cmndcntrl/code/catch/renew-ssl-certs.sh >> /home/cmndcntrl/code/catch/ssl-renewal.log 2>&1

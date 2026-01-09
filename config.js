@@ -9,7 +9,7 @@ require('dotenv').config();
 const config = {
   // Server Configuration
   server: {
-    port: process.env.PORT || (process.env.NODE_ENV === 'production' ? 443 : 8080),
+    port: process.env.PORT || (process.env.NODE_ENV === 'production' ? 443 : 8443),
     httpsPort: parseInt(process.env.HTTPS_PORT) || 443,
     httpPort: parseInt(process.env.HTTP_PORT) || 80,
     bindAddress: process.env.BIND_ADDRESS || '0.0.0.0',
@@ -18,8 +18,8 @@ const config = {
 
   // SSL/TLS Configuration
   ssl: {
-    keyPath: process.env.SSL_KEY_PATH || '/etc/letsencrypt/live/your-domain/privkey.pem',
-    certPath: process.env.SSL_CERT_PATH || '/etc/letsencrypt/live/your-domain/fullchain.pem',
+    keyPath: process.env.SSL_KEY_PATH || '/etc/letsencrypt/live/catch.attck-deploy.net/privkey.pem',
+    certPath: process.env.SSL_CERT_PATH || '/etc/letsencrypt/live/catch.attck-deploy.net/fullchain.pem',
     useHttps: process.env.USE_HTTPS === 'true' || process.env.NODE_ENV === 'production',
     forceHttps: process.env.FORCE_HTTPS === 'true' || process.env.NODE_ENV === 'production'
   },
