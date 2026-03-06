@@ -42,11 +42,9 @@
     "win32"
   ],
   "dependencies": {
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.3.1",
+    "geoip-lite": "^1.4.10"
   },
-  "devDependencies": {},
-  "optionalDependencies": {},
-  "peerDependencies": {},
   "bundledDependencies": [],
   "files": [
     "server.js",
@@ -72,5 +70,6 @@
   "publishConfig": {
     "registry": "https://registry.npmjs.org/",
     "access": "public"
-  }
+  },
+  "bundleDependencies": []
 }

@@ -5,6 +5,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { parse } = require('url');
+const dns = require('dns');
 const { config, getBaseUrl, getEndpointUrl, isDevelopment, isProduction, shouldUseHttps } = require('./config');
 
 // Function to extract the real client IP address
@@ -91,6 +92,536 @@ function createLogEntry(req, clientIP, timestamp, body = '') {
   return logEntry;
 }
 
+// ============================================================================
+// BLOCKING AND SECURITY FUNCTIONS
+// ============================================================================
+
+// Rate limiting storage
+const rateLimitStore = new Map(); // { ip: { count: number, resetTime: timestamp } }
+
+// Violation tracking storage
+const violationStore = new Map(); // { ip: { count: number, firstViolation: timestamp } }
+
+/**
+ * Clean up expired rate limit entries
+ */
+function cleanupRateLimitStore() {
+  const now = Date.now();
+  for (const [ip, data] of rateLimitStore.entries()) {
+    if (now > data.resetTime) {
+      rateLimitStore.delete(ip);
+    }
+  }
+}
+
+// Clean up every minute
+setInterval(cleanupRateLimitStore, 60000);
+
+/**
+ * Check if IP has exceeded rate limit
+ * @param {string} clientIP - Client IP address
+ * @returns {Object} { limited: boolean, resetTime: number|null }
+ */
+function checkRateLimit(clientIP) {
+  if (!config.blocking.rateLimitEnabled) {
+    return { limited: false, resetTime: null };
+  }
+
+  const now = Date.now();
+  const entry = rateLimitStore.get(clientIP);
+
+  if (!entry || now > entry.resetTime) {
+    // New window or expired entry
+    rateLimitStore.set(clientIP, {
+      count: 1,
+      resetTime: now + config.security.rateLimit.windowMs
+    });
+    return { limited: false, resetTime: null };
+  }
+
+  // Increment count
+  entry.count++;
+
+  if (entry.count > config.security.rateLimit.maxRequests) {
+    return { limited: true, resetTime: entry.resetTime };
+  }
+
+  return { limited: false, resetTime: null };
+}
+
+/**
+ * Record a violation and check if IP should be auto-blocked
+ * @param {string} clientIP - Client IP address
+ * @returns {boolean} True if IP should be auto-blocked
+ */
+function recordViolation(clientIP) {
+  if (!config.blocking.autoBlockAfterViolations) {
+    return false;
+  }
+
+  const now = Date.now();
+  const entry = violationStore.get(clientIP);
+
+  if (!entry) {
+    violationStore.set(clientIP, { count: 1, firstViolation: now });
+    return false;
+  }
+
+  entry.count++;
+
+  if (entry.count >= config.blocking.autoBlockAfterViolations) {
+    // Add to blocked IPs list
+    if (!config.blocking.blockedIPs.includes(clientIP)) {
+      config.blocking.blockedIPs.push(clientIP);
+      console.log(`🚨 AUTO-BLOCKED IP after ${entry.count} violations: ${clientIP}`);
+
+      // Schedule unblock
+      if (config.blocking.autoBlockDuration > 0) {
+        setTimeout(() => {
+          const index = config.blocking.blockedIPs.indexOf(clientIP);
+          if (index > -1) {
+            config.blocking.blockedIPs.splice(index, 1);
+            violationStore.delete(clientIP);
+            console.log(`✅ AUTO-UNBLOCKED IP after timeout: ${clientIP}`);
+          }
+        }, config.blocking.autoBlockDuration);
+      }
+    }
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Check if IP matches CIDR range
+ * @param {string} ip - IP address to check
+ * @param {string} cidr - CIDR notation (e.g., "192.168.1.0/24")
+ * @returns {boolean} True if IP is in CIDR range
+ */
+function ipInCIDR(ip, cidr) {
+  if (!cidr.includes('/')) {
+    return ip === cidr; // Exact match
+  }
+
+  const [range, bits] = cidr.split('/');
+  const mask = ~(2 ** (32 - parseInt(bits)) - 1);
+
+  const ipToInt = (ipStr) => {
+    return ipStr.split('.').reduce((int, octet) => (int << 8) + parseInt(octet), 0) >>> 0;
+  };
+
+  return (ipToInt(ip) & mask) === (ipToInt(range) & mask);
+}
+
+/**
+ * Check if IP is in any blocked CIDR range or exact blocklist
+ * @param {string} clientIP - Client IP address
+ * @returns {boolean} True if IP is blocked
+ */
+function isIPBlocked(clientIP) {
+  // Check exact IPs
+  if (config.blocking.blockedIPs.includes(clientIP)) {
+    return true;
+  }
+
+  // Check CIDR ranges
+  for (const cidr of config.blocking.blockedCIDRs || []) {
+    if (ipInCIDR(clientIP, cidr)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Check if request is whitelisted and should bypass blocking
+ * @param {Object} req - HTTP request object
+ * @param {string} clientIP - Client IP address
+ * @returns {boolean} True if whitelisted
+ */
+function isWhitelisted(req, clientIP) {
+  if (!config.blocking.whitelistEnabled) {
+    return false;
+  }
+
+  // Check IP whitelist
+  if (config.blocking.whitelistedIPs.includes(clientIP)) {
+    return true;
+  }
+
+  // Check CIDR whitelist
+  for (const cidr of config.blocking.whitelistedCIDRs) {
+    if (ipInCIDR(clientIP, cidr)) {
+      return true;
+    }
+  }
+
+  // Check User-Agent whitelist
+  const userAgent = req.headers['user-agent'] || '';
+  for (const pattern of config.blocking.whitelistedUserAgents) {
+    try {
+      const regex = new RegExp(pattern, 'i');
+      if (regex.test(userAgent)) {
+        return true;
+      }
+    } catch (err) {
+      console.error(`Invalid whitelist regex: ${pattern}`);
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Check if IP should be blocked based on GeoIP
+ * @param {string} clientIP - Client IP address
+ * @returns {Object} { blocked: boolean, reason: string|null, country: string|null }
+ */
+function checkGeoIPBlocking(clientIP) {
+  if (!config.blocking.geoIPEnabled) {
+    return { blocked: false, reason: null, country: null };
+  }
+
+  try {
+    const geoip = require('geoip-lite');
+    const geo = geoip.lookup(clientIP);
+
+    if (!geo) {
+      // Unknown country - block if configured
+      if (config.blocking.blockUnknownCountries) {
+        return { blocked: true, reason: 'Unknown country/region', country: null };
+      }
+      return { blocked: false, reason: null, country: null };
+    }
+
+    const country = geo.country;
+
+    // Check blocked countries
+    if (config.blocking.blockedCountries.includes(country)) {
+      return { blocked: true, reason: `Blocked country: ${country}`, country };
+    }
+
+    // Check allowed countries (if whitelist mode)
+    if (config.blocking.allowedCountries.length > 0 &&
+        !config.blocking.allowedCountries.includes(country)) {
+      return { blocked: true, reason: `Country not in allowlist: ${country}`, country };
+    }
+
+    return { blocked: false, reason: null, country };
+  } catch (err) {
+    // GeoIP module not installed or error occurred
+    return { blocked: false, reason: null, country: null };
+  }
+}
+
+/**
+ * Check IP against threat intelligence feeds
+ * @param {string} clientIP - Client IP address
+ * @returns {Promise<Object>} { blocked: boolean, reason: string|null, feed: string|null }
+ */
+async function checkThreatFeeds(clientIP) {
+  if (!config.blocking.threatFeedsEnabled) {
+    return { blocked: false, reason: null, feed: null };
+  }
+
+  // Check AbuseIPDB
+  if (config.blocking.abuseIPDBKey) {
+    try {
+      const https = require('https');
+
+      return new Promise((resolve) => {
+        const options = {
+          hostname: 'api.abuseipdb.com',
+          path: `/api/v2/check?ipAddress=${clientIP}`,
+          method: 'GET',
+          headers: {
+            'Key': config.blocking.abuseIPDBKey,
+            'Accept': 'application/json'
+          }
+        };
+
+        const req = https.request(options, (res) => {
+          let data = '';
+
+          res.on('data', (chunk) => {
+            data += chunk;
+          });
+
+          res.on('end', () => {
+            try {
+              const json = JSON.parse(data);
+              if (json.data && json.data.abuseConfidenceScore > config.blocking.threatScoreThreshold) {
+                resolve({
+                  blocked: true,
+                  reason: `Threat feed: AbuseIPDB score ${json.data.abuseConfidenceScore}%`,
+                  feed: 'AbuseIPDB'
+                });
+              } else {
+                resolve({ blocked: false, reason: null, feed: null });
+              }
+            } catch (err) {
+              console.error('Error parsing AbuseIPDB response:', err);
+              resolve({ blocked: false, reason: null, feed: null });
+            }
+          });
+        });
+
+        req.on('error', (err) => {
+          console.error('Error checking AbuseIPDB:', err);
+          resolve({ blocked: false, reason: null, feed: null });
+        });
+
+        req.end();
+      });
+    } catch (err) {
+      console.error('Error in threat feed check:', err);
+      return { blocked: false, reason: null, feed: null };
+    }
+  }
+
+  return { blocked: false, reason: null, feed: null };
+}
+
+/**
+ * Check if text matches any pattern in the array
+ * @param {string} text - Text to check
+ * @param {Array<string>} patterns - Array of regex pattern strings
+ * @returns {Object} { matched: boolean, pattern: string|null }
+ */
+function matchesPattern(text, patterns) {
+  if (!text || !patterns || patterns.length === 0) {
+    return { matched: false, pattern: null };
+  }
+
+  for (const pattern of patterns) {
+    try {
+      const regex = new RegExp(pattern, 'i');
+      if (regex.test(text)) {
+        return { matched: true, pattern: pattern };
+      }
+    } catch (err) {
+      console.error(`Invalid regex pattern: ${pattern}`, err);
+    }
+  }
+
+  return { matched: false, pattern: null };
+}
+
+/**
+ * Check if request should be blocked based on configured rules
+ * @param {Object} req - HTTP request object
+ * @param {string} clientIP - Client IP address
+ * @param {string} body - Request body (optional)
+ * @returns {Promise<Object>} { blocked: boolean, reason: string|null }
+ */
+async function shouldBlockRequest(req, clientIP, body = null) {
+  if (!config.blocking.enabled) {
+    return { blocked: false, reason: null };
+  }
+
+  // Check whitelist first
+  if (isWhitelisted(req, clientIP)) {
+    return { blocked: false, reason: null };
+  }
+
+  // Check rate limit
+  const rateCheck = checkRateLimit(clientIP);
+  if (rateCheck.limited) {
+    return { blocked: true, reason: 'Rate limit exceeded' };
+  }
+
+  // Check IP blocklist
+  if (isIPBlocked(clientIP)) {
+    return { blocked: true, reason: `Blocked IP: ${clientIP}` };
+  }
+
+  // Check GeoIP blocking
+  const geoCheck = checkGeoIPBlocking(clientIP);
+  if (geoCheck.blocked) {
+    return { blocked: true, reason: geoCheck.reason };
+  }
+
+  // Check threat feeds
+  const threatCheck = await checkThreatFeeds(clientIP);
+  if (threatCheck.blocked) {
+    return { blocked: true, reason: threatCheck.reason };
+  }
+
+  // Check User-Agent patterns
+  const userAgent = req.headers['user-agent'] || '';
+  const uaMatch = matchesPattern(userAgent, config.blocking.blockedUserAgents);
+  if (uaMatch.matched) {
+    return { blocked: true, reason: `Blocked User-Agent pattern: ${uaMatch.pattern}` };
+  }
+
+  // Check URL patterns
+  const url = req.url || '';
+  const urlMatch = matchesPattern(url, config.blocking.blockedUrlPatterns);
+  if (urlMatch.matched) {
+    return { blocked: true, reason: `Blocked URL pattern: ${urlMatch.pattern}` };
+  }
+
+  // Check POST body patterns if body provided
+  if (body) {
+    const bodyMatch = matchesPattern(body, config.blocking.blockedBodyPatterns);
+    if (bodyMatch.matched) {
+      return { blocked: true, reason: `Blocked POST body pattern: ${bodyMatch.pattern}` };
+    }
+  }
+
+  return { blocked: false, reason: null };
+}
+
+/**
+ * Send blocked response to client
+ * @param {Object} res - HTTP response object
+ * @param {string} reason - Reason for blocking
+ * @param {string} clientIP - Client IP address
+ * @param {string} timestamp - Request timestamp
+ */
+function sendBlockedResponse(res, reason, clientIP, timestamp) {
+  const responseCode = config.blocking.responseCode;
+  const responseMessage = responseCode === 444 ? '' : `Blocked: ${reason}`;
+
+  console.log(`[${timestamp}] 🚫 BLOCKED REQUEST from ${clientIP}: ${reason}`);
+
+  // Log blocked request to separate file
+  const blockLogEntry = `${timestamp} | IP: ${clientIP} | STATUS: BLOCKED | REASON: ${reason}\n`;
+  fs.appendFile('blocked-requests.log', blockLogEntry, (err) => {
+    if (err) console.error('Error writing to blocked log:', err);
+  });
+
+  // Record violation for auto-blocking
+  recordViolation(clientIP);
+
+  if (responseCode === 444) {
+    // Nginx-style: close connection without response
+    res.destroy();
+    return;
+  }
+
+  // Send HTTP error response
+  res.writeHead(responseCode, {
+    'Content-Type': 'text/plain',
+    'X-Blocked-Reason': reason.substring(0, 100),
+    'Connection': 'close'
+  });
+  res.end(responseMessage);
+}
+
+// ============================================================================
+// END BLOCKING AND SECURITY FUNCTIONS
+// ============================================================================
+
+// ============================================================================
+// ADMIN INTERFACE FUNCTIONS
+// ============================================================================
+
+// Admin authentication token from environment
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || 'change-me-in-production-use-strong-random-token';
+
+/**
+ * Check admin authentication
+ * @param {Object} req - HTTP request object
+ * @returns {boolean} True if authenticated
+ */
+function checkAdminAuth(req) {
+  const token = req.headers['x-admin-token'] || parse(req.url, true).query.token;
+  return token === ADMIN_TOKEN;
+}
+
+/**
+ * Calculate statistics from log file
+ * @param {Array<string>} lines - Log file lines
+ * @returns {Object} Statistics object
+ */
+function calculateStats(lines) {
+  const stats = {
+    totalRequests: lines.length,
+    blockedRequests: 0,
+    uniqueIPs: new Set(),
+    threatScore: 0,
+    topAttackers: {},
+    attackPatterns: {},
+    requestTrends: []
+  };
+
+  lines.forEach(line => {
+    const log = parseLogLine(line);
+    if (!log) return;
+
+    // Count unique IPs
+    if (log.IP) {
+      stats.uniqueIPs.add(log.IP);
+    }
+
+    // Count blocked requests
+    if (log.STATUS === 'BLOCKED') {
+      stats.blockedRequests++;
+
+      // Track top attackers
+      if (log.IP) {
+        stats.topAttackers[log.IP] = (stats.topAttackers[log.IP] || 0) + 1;
+      }
+
+      // Track attack patterns
+      if (log.REASON) {
+        const pattern = log.REASON.split(':')[0]; // Extract pattern type
+        stats.attackPatterns[pattern] = (stats.attackPatterns[pattern] || 0) + 1;
+      }
+    }
+  });
+
+  // Convert unique IPs set to count
+  stats.uniqueIPs = stats.uniqueIPs.size;
+
+  // Calculate threat score (percentage of blocked requests)
+  stats.threatScore = stats.totalRequests > 0
+    ? Math.round((stats.blockedRequests / stats.totalRequests) * 100)
+    : 0;
+
+  // Sort and limit top attackers
+  stats.topAttackers = Object.entries(stats.topAttackers)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([ip, count]) => ({ ip, count }));
+
+  return stats;
+}
+
+/**
+ * Parse log line into object
+ * @param {string} line - Log line
+ * @returns {Object|null} Parsed log object
+ */
+function parseLogLine(line) {
+  const parts = line.split(' | ');
+  if (parts.length < 3) return null;
+
+  const log = {};
+  parts.forEach((part, index) => {
+    if (index === 0) {
+      // First part is always the timestamp (ISO format contains colons)
+      log.timestamp = part.trim();
+      return;
+    }
+    const colonIndex = part.indexOf(':');
+    if (colonIndex > 0) {
+      const key = part.substring(0, colonIndex).trim();
+      const value = part.substring(colonIndex + 1).trim();
+      log[key] = value;
+    }
+  });
+
+  return log;
+}
+
+// ============================================================================
+// END ADMIN INTERFACE FUNCTIONS
+// ============================================================================
+
 // Function to serve static files
 function serveStaticFile(req, res, filePath) {
   const extname = path.extname(filePath).toLowerCase();
@@ -119,9 +650,10 @@ function serveStaticFile(req, res, filePath) {
         res.end('Server error: ' + error.code);
       }
     } else {
-      res.writeHead(200, { 
+      const cacheControl = filePath.includes('admin') ? 'no-cache' : 'public, max-age=3600';
+      res.writeHead(200, {
         'Content-Type': contentType,
-        'Cache-Control': 'public, max-age=3600'
+        'Cache-Control': cacheControl
       });
       res.end(content, 'utf-8');
     }
@@ -275,12 +807,26 @@ try {
 }
 
 // Main request handler for HTTPS server
-function handleRequest(req, res) {
+async function handleRequest(req, res) {
   const timestamp = new Date().toISOString();
   const clientIP = getClientIP(req);
   const method = req.method;
   const url = parse(req.url, true);
-  
+
+  // Check if request should be blocked (for GET/HEAD/OPTIONS and methods without body)
+  if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+    const blockCheck = await shouldBlockRequest(req, clientIP);
+    if (blockCheck.blocked) {
+      if (config.blocking.mode === 'block') {
+        sendBlockedResponse(res, blockCheck.reason, clientIP, timestamp);
+        return;
+      } else {
+        // Log-only mode: continue but log the detection
+        console.log(`[${timestamp}] ⚠️  WOULD BLOCK (log mode): ${blockCheck.reason}`);
+      }
+    }
+  }
+
   // Route handling for GET requests
   if (method === 'GET') {
     // Serve fingerprinting landing page
@@ -364,14 +910,227 @@ function handleRequest(req, res) {
       res.end('<html><body><script>console.log("Data received");</script></body></html>');
       return;
     }
+
+    // Handle admin interface
+    if (url.pathname === '/admin' || url.pathname === '/admin.html') {
+      if (!checkAdminAuth(req)) {
+        res.writeHead(401, { 'Content-Type': 'text/plain' });
+        res.end('Unauthorized - Invalid admin token');
+        return;
+      }
+      serveStaticFile(req, res, path.join(__dirname, 'admin.html'));
+      return;
+    }
+
+    // GET /api/admin/config - Get current configuration
+    if (url.pathname === '/api/admin/config') {
+      if (!checkAdminAuth(req)) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Unauthorized' }));
+        return;
+      }
+
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-store'
+      });
+      res.end(JSON.stringify({
+        blocking: config.blocking,
+        security: config.security
+      }));
+      return;
+    }
+
+    // GET /api/admin/logs - Get recent logs
+    if (url.pathname === '/api/admin/logs') {
+      if (!checkAdminAuth(req)) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Unauthorized' }));
+        return;
+      }
+
+      const limit = parseInt(url.query.limit) || 100;
+      const filter = url.query.filter || 'all';
+
+      fs.readFile(config.logging.file, 'utf8', (err, data) => {
+        if (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Failed to read logs' }));
+          return;
+        }
+
+        let lines = data.trim().split('\n').filter(line => line.length > 0);
+
+        // Apply filter
+        if (filter === 'blocked') {
+          lines = lines.filter(line => line.includes('BLOCKED'));
+        } else if (filter === 'malicious') {
+          lines = lines.filter(line =>
+            line.includes('BLOCKED') ||
+            line.includes('python-requests') ||
+            line.includes('androxgh0st') ||
+            line.includes('%3Cscript')
+          );
+        }
+
+        // Get last N lines
+        lines = lines.slice(-limit);
+
+        const logs = lines.map(line => parseLogLine(line)).filter(Boolean);
+
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store'
+        });
+        res.end(JSON.stringify({ logs, count: logs.length }));
+      });
+      return;
+    }
+
+    // GET /api/admin/unique-ips - Get unique IPs with details
+    if (url.pathname === '/api/admin/unique-ips') {
+      if (!checkAdminAuth(req)) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Unauthorized' }));
+        return;
+      }
+
+      fs.readFile(config.logging.file, 'utf8', async (err, data) => {
+        if (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Failed to read logs' }));
+          return;
+        }
+
+        const lines = data.trim().split('\n').filter(line => line.length > 0);
+        const ipMap = {};
+
+        lines.forEach(line => {
+          const log = parseLogLine(line);
+          if (!log || !log.IP) return;
+
+          if (!ipMap[log.IP]) {
+            ipMap[log.IP] = { requests: [], firstSeen: log.timestamp, lastSeen: log.timestamp };
+          }
+
+          ipMap[log.IP].lastSeen = log.timestamp;
+          ipMap[log.IP].requests.push({
+            timestamp: log.timestamp,
+            method: log.Method || '',
+            url: log.URL || '',
+            host: log.HOST || log.Host || '',
+            ua: log.UA || '',
+            status: log.STATUS || '',
+            reason: log.REASON || ''
+          });
+        });
+
+        // Perform reverse DNS lookups in parallel
+        const ipAddresses = Object.keys(ipMap);
+        const dnsResults = await Promise.allSettled(
+          ipAddresses.map(ip => dns.promises.reverse(ip).catch(() => []))
+        );
+
+        const ips = ipAddresses.map((ip, i) => {
+          const info = ipMap[ip];
+          const hostnames = dnsResults[i].status === 'fulfilled' ? dnsResults[i].value : [];
+          const hosts = [...new Set(info.requests.map(r => r.host).filter(Boolean))];
+          return {
+            ip,
+            reverseDns: hostnames,
+            hostHeaders: hosts,
+            requestCount: info.requests.length,
+            firstSeen: info.firstSeen,
+            lastSeen: info.lastSeen,
+            requests: info.requests
+          };
+        });
+
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store'
+        });
+        res.end(JSON.stringify({ ips, count: ips.length }));
+      });
+      return;
+    }
+
+    // GET /api/admin/stats - Get statistics
+    if (url.pathname === '/api/admin/stats') {
+      if (!checkAdminAuth(req)) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Unauthorized' }));
+        return;
+      }
+
+      fs.readFile(config.logging.file, 'utf8', (err, data) => {
+        if (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Failed to read logs' }));
+          return;
+        }
+
+        const lines = data.trim().split('\n').filter(line => line.length > 0);
+        const stats = calculateStats(lines);
+
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store'
+        });
+        res.end(JSON.stringify(stats));
+      });
+      return;
+    }
   }
-  
+
+  // Handle POST requests for admin API
+  if (method === 'POST' && url.pathname === '/api/admin/config') {
+    if (!checkAdminAuth(req)) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Unauthorized' }));
+      return;
+    }
+
+    handleRequestWithBody(req, async (err, body) => {
+      if (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Bad Request' }));
+        return;
+      }
+
+      try {
+        const updates = JSON.parse(body);
+
+        // Update config object (in-memory)
+        if (updates.blocking) {
+          Object.assign(config.blocking, updates.blocking);
+        }
+        if (updates.security) {
+          Object.assign(config.security, updates.security);
+        }
+
+        console.log('[ADMIN] Configuration updated:', updates);
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          message: 'Configuration updated successfully'
+        }));
+      } catch (error) {
+        console.error('[ADMIN] Config update error:', error);
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid JSON' }));
+      }
+    });
+    return;
+  }
+
   // Define methods that can have request bodies
   const methodsWithBody = ['POST', 'PUT', 'PATCH', 'DELETE'];
   
   if (methodsWithBody.includes(method)) {
     // Handle methods that can have request bodies
-    handleRequestWithBody(req, (err, body) => {
+    handleRequestWithBody(req, async (err, body) => {
       if (err) {
         console.error(`[${timestamp}] Error reading ${method} body:`, err);
         const statusCode = err.statusCode || 400;
@@ -379,16 +1138,34 @@ function handleRequest(req, res) {
         res.end(statusCode === 413 ? 'Request entity too large' : 'Bad Request');
         return;
       }
-      
+
+      // Check blocking with body content
+      const blockCheck = await shouldBlockRequest(req, clientIP, body);
+      if (blockCheck.blocked) {
+        if (config.blocking.mode === 'block') {
+          // Log before blocking
+          logRequestDetails(req, clientIP, timestamp, body);
+          const logEntry = createLogEntry(req, clientIP, timestamp, body);
+          fs.appendFile(config.logging.file, logEntry, (err) => {
+            if (err) console.error('Error writing to log file:', err);
+          });
+
+          sendBlockedResponse(res, blockCheck.reason, clientIP, timestamp);
+          return;
+        } else {
+          console.log(`[${timestamp}] ⚠️  WOULD BLOCK (log mode): ${blockCheck.reason}`);
+        }
+      }
+
       // Log request details
       logRequestDetails(req, clientIP, timestamp, body);
-      
+
       // Create and write log entry
       const logEntry = createLogEntry(req, clientIP, timestamp, body);
       fs.appendFile(config.logging.file, logEntry, (err) => {
         if (err) console.error('Error writing to log file:', err);
       });
-      
+
       // Send response
       sendResponse(res, req, clientIP, timestamp, body);
     });

@@ -181,6 +181,7 @@ victim-data/
 collected-data/
 session-logs/
 fingerprint-data/
+blocked-requests.log
 
 # Deployment specific
 deploy/

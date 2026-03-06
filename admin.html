@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Catch Framework - Security Management</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/js/admin.css?v=4">
+</head>
+<body>
+    <div class="admin-container">
+        <header>
+            <div>
+                <h1><i class="fas fa-shield-alt"></i> Catch Framework - Security Management</h1>
+                <p class="subtitle">Manage blocking rules, monitor threats, and review captured requests</p>
+            </div>
+            <button id="theme-toggle" class="theme-toggle" title="Toggle dark mode">
+                <i class="fas fa-moon"></i>
+            </button>
+        </header>
+
+        <nav class="tab-nav">
+            <button class="tab-button active" data-tab="dashboard"><i class="fas fa-tachometer-alt"></i> Dashboard</button>
+            <button class="tab-button" data-tab="blocking"><i class="fas fa-ban"></i> Blocking Rules</button>
+            <button class="tab-button" data-tab="logs"><i class="fas fa-file-alt"></i> Request Logs</button>
+            <button class="tab-button" data-tab="stats"><i class="fas fa-chart-bar"></i> Statistics</button>
+            <button class="tab-button" data-tab="unique-ips"><i class="fas fa-users"></i> Unique IPs</button>
+            <button class="tab-button" data-tab="config"><i class="fas fa-cog"></i> Configuration</button>
+        </nav>
+
+        <!-- Dashboard Tab -->
+        <div class="tab-content active" id="dashboard">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <i class="fas fa-network-wired"></i>
+                    <h3 id="total-requests">0</h3>
+                    <p>Total Requests</p>
+                </div>
+                <div class="stat-card blocked">
+                    <i class="fas fa-ban"></i>
+                    <h3 id="blocked-requests">0</h3>
+                    <p>Blocked Requests</p>
+                </div>
+                <div class="stat-card warning">
+                    <i class="fas fa-exclamation-triangle"></i>
+                    <h3 id="threat-score">0</h3>
+                    <p>Threat Score</p>
+                </div>
+                <div class="stat-card info clickable" id="unique-ips-card" onclick="navigateToUniqueIPs()" title="Click to view all unique IPs">
+                    <i class="fas fa-users"></i>
+                    <h3 id="unique-ips-count">0</h3>
+                    <p>Unique IPs</p>
+                </div>
+            </div>
+
+            <div class="recent-activity">
+                <h2><i class="fas fa-clock"></i> Recent Activity</h2>
+                <div id="activity-feed" class="activity-list"></div>
+            </div>
+        </div>
+
+        <!-- Blocking Rules Tab -->
+        <div class="tab-content" id="blocking">
+            <div class="section">
+                <h2><i class="fas fa-ban-circle"></i> IP Blocking</h2>
+                <div class="rule-manager">
+                    <label for="blocked-ips">Blocked IP Addresses (one per line or comma-separated):</label>
+                    <textarea id="blocked-ips" rows="5" placeholder="Enter IPs (e.g., 193.149.185.213)"></textarea>
+                    <label for="blocked-cidrs">Blocked CIDR Ranges:</label>
+                    <textarea id="blocked-cidrs" rows="3" placeholder="Enter CIDR ranges (e.g., 192.168.1.0/24)"></textarea>
+                    <button class="btn-primary" onclick="saveIPRules()"><i class="fas fa-save"></i> Save IP Rules</button>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2><i class="fas fa-robot"></i> User-Agent Blocking</h2>
+                <div class="rule-manager">
+                    <label for="blocked-user-agents">Blocked User-Agent Patterns (regex, one per line):</label>
+                    <textarea id="blocked-user-agents" rows="5" placeholder="Enter patterns (e.g., python-requests, Go-http-client)"></textarea>
+                    <button class="btn-primary" onclick="saveUARules()"><i class="fas fa-save"></i> Save UA Rules</button>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2><i class="fas fa-link"></i> URL Pattern Blocking</h2>
+                <div class="rule-manager">
+                    <label for="blocked-url-patterns">Blocked URL Patterns (regex, one per line):</label>
+                    <textarea id="blocked-url-patterns" rows="5" placeholder="Enter patterns (e.g., %3Cscript, <script, /\.env)"></textarea>
+                    <button class="btn-primary" onclick="saveURLRules()"><i class="fas fa-save"></i> Save URL Rules</button>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2><i class="fas fa-file-code"></i> POST Body Pattern Blocking</h2>
+                <div class="rule-manager">
+                    <label for="blocked-body-patterns">Blocked POST Body Patterns (regex, one per line):</label>
+                    <textarea id="blocked-body-patterns" rows="5" placeholder="Enter patterns (e.g., androxgh0st, c99shell)"></textarea>
+                    <button class="btn-primary" onclick="saveBodyRules()"><i class="fas fa-save"></i> Save Body Rules</button>
+                </div>
+            </div>
+
+            <div class="section">
+                <h2><i class="fas fa-check-circle"></i> Whitelist</h2>
+                <div class="rule-manager">
+                    <label>
+                        <input type="checkbox" id="whitelist-enabled"> Enable Whitelist (bypass all blocking)
+                    </label>
+                    <label for="whitelisted-ips">Whitelisted IP Addresses:</label>
+                    <textarea id="whitelisted-ips" rows="3" placeholder="Whitelisted IPs (e.g., 127.0.0.1)"></textarea>
+                    <label for="whitelisted-cidrs">Whitelisted CIDR Ranges:</label>
+                    <textarea id="whitelisted-cidrs" rows="2" placeholder="Whitelisted CIDR ranges"></textarea>
+                    <label for="whitelisted-user-agents">Whitelisted User-Agent Patterns:</label>
+                    <textarea id="whitelisted-user-agents" rows="3" placeholder="Whitelisted patterns (e.g., Googlebot)"></textarea>
+                    <button class="btn-primary" onclick="saveWhitelist()"><i class="fas fa-save"></i> Save Whitelist</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Logs Tab -->
+        <div class="tab-content" id="logs">
+            <div class="log-controls">
+                <button class="btn-secondary" onclick="refreshLogs()"><i class="fas fa-sync"></i> Refresh</button>
+                <select id="log-filter" onchange="filterLogs()">
+                    <option value="all">All Requests</option>
+                    <option value="blocked">Blocked Only</option>
+                    <option value="malicious">Malicious Patterns</option>
+                </select>
+                <input type="text" id="log-search" placeholder="Search logs..." oninput="searchLogs()">
+                <label>
+                    Limit: <input type="number" id="log-limit" value="100" min="10" max="1000" step="10" onchange="refreshLogs()">
+                </label>
+            </div>
+            <div id="log-viewer" class="log-viewer"></div>
+        </div>
+
+        <!-- Statistics Tab -->
+        <div class="tab-content" id="stats">
+            <div class="chart-container">
+                <h2><i class="fas fa-chart-line"></i> Request Trends</h2>
+                <canvas id="request-chart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h2><i class="fas fa-globe"></i> Top Attack Sources</h2>
+                <div id="top-attackers"></div>
+            </div>
+            <div class="chart-container">
+                <h2><i class="fas fa-bug"></i> Attack Patterns</h2>
+                <div id="attack-patterns"></div>
+            </div>
+        </div>
+
+        <!-- Unique IPs Tab -->
+        <div class="tab-content" id="unique-ips">
+            <div class="ip-list-controls">
+                <input type="text" id="ip-search" placeholder="Search by IP or hostname..." oninput="filterIPs()">
+                <select id="ip-sort" onchange="sortAndDisplayIPs()">
+                    <option value="count-desc">Most Requests</option>
+                    <option value="count-asc">Fewest Requests</option>
+                    <option value="last-desc">Last Seen (Newest)</option>
+                    <option value="last-asc">Last Seen (Oldest)</option>
+                    <option value="first-desc">First Seen (Newest)</option>
+                    <option value="first-asc">First Seen (Oldest)</option>
+                    <option value="ip-asc">IP (A-Z)</option>
+                </select>
+                <button class="btn-secondary" onclick="loadUniqueIPs()"><i class="fas fa-sync"></i> Refresh</button>
+            </div>
+            <div id="ip-list" class="ip-list"></div>
+        </div>
+
+        <!-- Configuration Tab -->
+        <div class="tab-content" id="config">
+            <div class="config-section">
+                <h2><i class="fas fa-toggle-on"></i> Blocking Configuration</h2>
+                <div class="config-item">
+                    <label><input type="checkbox" id="blocking-enabled"> Enable Blocking</label>
+                </div>
+                <div class="config-item">
+                    <label>Blocking Mode:</label>
+                    <select id="blocking-mode">
+                        <option value="log">Log Only (detect but don't block)</option>
+                        <option value="block">Active Blocking</option>
+                    </select>
+                </div>
+                <div class="config-item">
+                    <label>Response Code:</label>
+                    <select id="response-code">
+                        <option value="403">403 Forbidden</option>
+                        <option value="429">429 Too Many Requests</option>
+                        <option value="444">444 Close Connection (no response)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="config-section">
+                <h2><i class="fas fa-tachometer-alt"></i> Rate Limiting</h2>
+                <div class="config-item">
+                    <label><input type="checkbox" id="rate-limit-enabled"> Enable Rate Limiting</label>
+                </div>
+                <div class="config-item">
+                    <label>Max Requests per Window:</label>
+                    <input type="number" id="rate-limit-max" min="1" value="100">
+                </div>
+                <div class="config-item">
+                    <label>Window Duration (ms):</label>
+                    <input type="number" id="rate-limit-window" min="1000" step="1000" value="900000">
+                    <small>(900000ms = 15 minutes)</small>
+                </div>
+            </div>
+
+            <div class="config-section">
+                <h2><i class="fas fa-lock"></i> Auto-Blocking</h2>
+                <div class="config-item">
+                    <label>Auto-block after violations:</label>
+                    <input type="number" id="auto-block-violations" min="1" value="5">
+                </div>
+                <div class="config-item">
+                    <label>Block duration (ms):</label>
+                    <input type="number" id="auto-block-duration" min="1000" step="1000" value="3600000">
+                    <small>(3600000ms = 1 hour)</small>
+                </div>
+            </div>
+
+            <div class="config-section">
+                <h2><i class="fas fa-globe-americas"></i> GeoIP Blocking</h2>
+                <div class="config-item">
+                    <label><input type="checkbox" id="geoip-enabled"> Enable GeoIP Blocking</label>
+                </div>
+                <div class="config-item">
+                    <label>Blocked Countries (comma-separated country codes):</label>
+                    <input type="text" id="blocked-countries" placeholder="e.g., CN,RU,KP">
+                </div>
+                <div class="config-item">
+                    <label>Allowed Countries (whitelist mode, empty = allow all):</label>
+                    <input type="text" id="allowed-countries" placeholder="e.g., US,CA,GB">
+                </div>
+                <div class="config-item">
+                    <label><input type="checkbox" id="block-unknown-countries"> Block Unknown Countries</label>
+                </div>
+            </div>
+
+            <div class="config-section">
+                <h2><i class="fas fa-shield-virus"></i> Threat Intelligence</h2>
+                <div class="config-item">
+                    <label><input type="checkbox" id="threat-feeds-enabled"> Enable Threat Feeds</label>
+                </div>
+                <div class="config-item">
+                    <label>AbuseIPDB API Key:</label>
+                    <input type="password" id="abuseipdb-key" placeholder="Enter API key">
+                    <small>Get your free API key at <a href="https://www.abuseipdb.com/" target="_blank">abuseipdb.com</a></small>
+                </div>
+                <div class="config-item">
+                    <label>Threat Score Threshold (0-100):</label>
+                    <input type="number" id="threat-threshold" min="0" max="100" value="75">
+                    <small>Block IPs with abuse score above this threshold</small>
+                </div>
+            </div>
+
+            <button class="btn-primary btn-large" onclick="saveConfiguration()">
+                <i class="fas fa-save"></i> Save All Configuration
+            </button>
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="/js/admin.js?v=4"></script>
+</body>
+</html>

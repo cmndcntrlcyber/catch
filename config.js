@@ -54,6 +54,53 @@ const config = {
     }
   },
 
+  // Request Blocking Configuration
+  blocking: {
+    enabled: process.env.ENABLE_BLOCKING === 'true',
+    mode: process.env.BLOCKING_MODE || 'log', // 'log' or 'block'
+    responseCode: parseInt(process.env.BLOCKING_RESPONSE_CODE) || 403,
+
+    // IP blocklist
+    blockedIPs: (process.env.BLOCKED_IPS || '').split(',').filter(Boolean),
+    blockedCIDRs: (process.env.BLOCKED_CIDR_RANGES || '').split(',').filter(Boolean),
+
+    // User-Agent patterns (regex strings)
+    blockedUserAgents: (process.env.BLOCKED_USER_AGENTS ||
+      'python-requests,python-httpx,Go-http-client,masscan').split(',').filter(Boolean),
+
+    // URL patterns (regex strings)
+    blockedUrlPatterns: (process.env.BLOCKED_URL_PATTERNS ||
+      '%3Cscript,%3Ciframe,<script,<iframe,0x%5B%5D,\\.\\./,/\\.env,/\\.git').split(',').filter(Boolean),
+
+    // POST body patterns (regex strings)
+    blockedBodyPatterns: (process.env.BLOCKED_BODY_PATTERNS ||
+      'androxgh0st,c99shell,r57shell,phpinfo\\(\\)').split(',').filter(Boolean),
+
+    // Rate limiting
+    rateLimitEnabled: process.env.ENABLE_RATE_LIMITING === 'true',
+
+    // Auto-blocking
+    autoBlockAfterViolations: parseInt(process.env.AUTO_BLOCK_AFTER_VIOLATIONS) || 5,
+    autoBlockDuration: parseInt(process.env.AUTO_BLOCK_DURATION) || 3600000, // 1 hour
+
+    // Whitelist
+    whitelistEnabled: process.env.ENABLE_WHITELIST === 'true',
+    whitelistedIPs: (process.env.WHITELISTED_IPS || '').split(',').filter(Boolean),
+    whitelistedCIDRs: (process.env.WHITELISTED_CIDR_RANGES || '').split(',').filter(Boolean),
+    whitelistedUserAgents: (process.env.WHITELISTED_USER_AGENTS || '').split(',').filter(Boolean),
+
+    // GeoIP blocking
+    geoIPEnabled: process.env.ENABLE_GEOIP_BLOCKING === 'true',
+    blockedCountries: (process.env.BLOCKED_COUNTRIES || '').split(',').filter(Boolean),
+    allowedCountries: (process.env.ALLOWED_COUNTRIES || '').split(',').filter(Boolean),
+    blockUnknownCountries: process.env.BLOCK_UNKNOWN_COUNTRIES === 'true',
+
+    // Threat intelligence
+    threatFeedsEnabled: process.env.ENABLE_THREAT_FEEDS === 'true',
+    abuseIPDBKey: process.env.ABUSEIPDB_API_KEY || '',
+    threatScoreThreshold: parseInt(process.env.THREAT_SCORE_THRESHOLD) || 75
+  },
+
   // Logging Configuration
   logging: {
     file: process.env.LOG_FILE || 'access.log',
