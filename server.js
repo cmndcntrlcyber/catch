@@ -1081,6 +1081,42 @@ async function handleRequest(req, res) {
       });
       return;
     }
+
+    // GET /api/admin/threat-intel/:ip - Get threat intelligence for an IP
+    if (url.pathname.startsWith('/api/admin/threat-intel/')) {
+      if (!checkAdminAuth(req)) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Unauthorized' }));
+        return;
+      }
+
+      const ip = url.pathname.split('/').pop();
+      
+      // Validate IP format
+      if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid IP address format' }));
+        return;
+      }
+
+      // Import threat intel module and perform correlation
+      const threatIntel = require('./lib/threat-intel');
+      
+      threatIntel.correlateIP(ip)
+        .then(result => {
+          res.writeHead(200, {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-store'
+          });
+          res.end(JSON.stringify(result));
+        })
+        .catch(error => {
+          console.error('[ADMIN] Threat intel error:', error);
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Failed to query threat intelligence' }));
+        });
+      return;
+    }
   }
 
   // Handle POST requests for admin API
@@ -1120,6 +1156,183 @@ async function handleRequest(req, res) {
         console.error('[ADMIN] Config update error:', error);
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ error: 'Invalid JSON' }));
+      }
+    });
+    return;
+  }
+
+  // POST /api/admin/blacklist/add - Add IP to blacklist
+  if (method === 'POST' && url.pathname === '/api/admin/blacklist/add') {
+    if (!checkAdminAuth(req)) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Unauthorized' }));
+      return;
+    }
+
+    handleRequestWithBody(req, async (err, body) => {
+      if (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Bad Request' }));
+        return;
+      }
+
+      try {
+        const { ip } = JSON.parse(body);
+
+        // Validate IP format
+        if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid IP address format' }));
+          return;
+        }
+
+        // Add to blacklist if not already present
+        if (!config.blocking.blockedIPs.includes(ip)) {
+          config.blocking.blockedIPs.push(ip);
+          console.log(`[ADMIN] IP added to blacklist: ${ip}`);
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          message: `IP ${ip} added to blacklist`,
+          blockedIPs: config.blocking.blockedIPs
+        }));
+      } catch (error) {
+        console.error('[ADMIN] Blacklist add error:', error);
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid request' }));
+      }
+    });
+    return;
+  }
+
+  // POST /api/admin/whitelist/add - Add IP to whitelist
+  if (method === 'POST' && url.pathname === '/api/admin/whitelist/add') {
+    if (!checkAdminAuth(req)) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Unauthorized' }));
+      return;
+    }
+
+    handleRequestWithBody(req, async (err, body) => {
+      if (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Bad Request' }));
+        return;
+      }
+
+      try {
+        const { ip } = JSON.parse(body);
+
+        // Validate IP format
+        if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Invalid IP address format' }));
+          return;
+        }
+
+        // Add to whitelist if not already present
+        if (!config.blocking.whitelistedIPs.includes(ip)) {
+          config.blocking.whitelistedIPs.push(ip);
+          console.log(`[ADMIN] IP added to whitelist: ${ip}`);
+        }
+
+        // Remove from blacklist if present
+        const blacklistIndex = config.blocking.blockedIPs.indexOf(ip);
+        if (blacklistIndex > -1) {
+          config.blocking.blockedIPs.splice(blacklistIndex, 1);
+          console.log(`[ADMIN] IP removed from blacklist: ${ip}`);
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          message: `IP ${ip} added to whitelist`,
+          whitelistedIPs: config.blocking.whitelistedIPs
+        }));
+      } catch (error) {
+        console.error('[ADMIN] Whitelist add error:', error);
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid request' }));
+      }
+    });
+    return;
+  }
+
+  // POST /api/admin/blacklist/remove - Remove IP from blacklist
+  if (method === 'POST' && url.pathname === '/api/admin/blacklist/remove') {
+    if (!checkAdminAuth(req)) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Unauthorized' }));
+      return;
+    }
+
+    handleRequestWithBody(req, async (err, body) => {
+      if (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Bad Request' }));
+        return;
+      }
+
+      try {
+        const { ip } = JSON.parse(body);
+
+        const index = config.blocking.blockedIPs.indexOf(ip);
+        if (index > -1) {
+          config.blocking.blockedIPs.splice(index, 1);
+          console.log(`[ADMIN] IP removed from blacklist: ${ip}`);
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          message: `IP ${ip} removed from blacklist`,
+          blockedIPs: config.blocking.blockedIPs
+        }));
+      } catch (error) {
+        console.error('[ADMIN] Blacklist remove error:', error);
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid request' }));
+      }
+    });
+    return;
+  }
+
+  // POST /api/admin/whitelist/remove - Remove IP from whitelist
+  if (method === 'POST' && url.pathname === '/api/admin/whitelist/remove') {
+    if (!checkAdminAuth(req)) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Unauthorized' }));
+      return;
+    }
+
+    handleRequestWithBody(req, async (err, body) => {
+      if (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Bad Request' }));
+        return;
+      }
+
+      try {
+        const { ip } = JSON.parse(body);
+
+        const index = config.blocking.whitelistedIPs.indexOf(ip);
+        if (index > -1) {
+          config.blocking.whitelistedIPs.splice(index, 1);
+          console.log(`[ADMIN] IP removed from whitelist: ${ip}`);
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          success: true,
+          message: `IP ${ip} removed from whitelist`,
+          whitelistedIPs: config.blocking.whitelistedIPs
+        }));
+      } catch (error) {
+        console.error('[ADMIN] Whitelist remove error:', error);
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Invalid request' }));
       }
     });
     return;

@@ -742,6 +742,18 @@ function displayIPList(ips) {
                         <strong>Reverse DNS:</strong> ${dnsStr}<br>
                         <strong>Host Headers:</strong> ${hostsStr}
                     </div>
+                    <div class="ip-actions" style="margin: 15px 0; display: flex; gap: 10px; flex-wrap: wrap;">
+                        <button class="btn-danger" onclick="addToBlacklist('${escapeHtml(entry.ip)}', event)">
+                            <i class="fas fa-ban"></i> Add to Blacklist
+                        </button>
+                        <button class="btn-success" onclick="addToWhitelist('${escapeHtml(entry.ip)}', event)">
+                            <i class="fas fa-check-circle"></i> Add to Whitelist
+                        </button>
+                        <button class="btn-primary" onclick="analyzeThreatIntel('${escapeHtml(entry.ip)}', event)">
+                            <i class="fas fa-shield-virus"></i> Analyze Threat Intel
+                        </button>
+                    </div>
+                    <div id="threat-intel-${index}" class="threat-intel-result" style="display: none;"></div>
                     <div class="ip-detail-table-wrap">
                         <table class="ip-detail-table">
                             <thead>
@@ -839,6 +851,205 @@ async function saveConfiguration() {
     } catch (error) {
         showToast('Failed to save configuration', 'error');
     }
+}
+
+// ============================================================================
+// BLACKLIST/WHITELIST MANAGEMENT
+// ============================================================================
+
+/**
+ * Add IP to blacklist
+ */
+async function addToBlacklist(ip, event) {
+    if (event) event.stopPropagation();
+    
+    if (!confirm(`Are you sure you want to add ${ip} to the blacklist?`)) {
+        return;
+    }
+
+    try {
+        await apiRequest('/api/admin/blacklist/add', {
+            method: 'POST',
+            body: JSON.stringify({ ip })
+        });
+        showToast(`IP ${ip} added to blacklist`, 'success');
+        // Reload blocking rules to show updated list
+        loadBlockingRules();
+    } catch (error) {
+        showToast(`Failed to add IP to blacklist: ${error.message}`, 'error');
+    }
+}
+
+/**
+ * Add IP to whitelist
+ */
+async function addToWhitelist(ip, event) {
+    if (event) event.stopPropagation();
+    
+    if (!confirm(`Are you sure you want to add ${ip} to the whitelist?`)) {
+        return;
+    }
+
+    try {
+        await apiRequest('/api/admin/whitelist/add', {
+            method: 'POST',
+            body: JSON.stringify({ ip })
+        });
+        showToast(`IP ${ip} added to whitelist`, 'success');
+        // Reload blocking rules to show updated list
+        loadBlockingRules();
+    } catch (error) {
+        showToast(`Failed to add IP to whitelist: ${error.message}`, 'error');
+    }
+}
+
+// ============================================================================
+// THREAT INTELLIGENCE ANALYSIS
+// ============================================================================
+
+/**
+ * Analyze IP using threat intelligence APIs
+ */
+async function analyzeThreatIntel(ip, event) {
+    if (event) event.stopPropagation();
+
+    // Find the IP item index from the current displayed list
+    const ipItems = document.querySelectorAll('.ip-list-item');
+    let targetIndex = -1;
+    ipItems.forEach((item, idx) => {
+        if (item.querySelector('.ip-address').textContent === ip) {
+            targetIndex = idx;
+        }
+    });
+
+    if (targetIndex === -1) {
+        showToast('Could not find IP in list', 'error');
+        return;
+    }
+
+    const resultDiv = document.getElementById(`threat-intel-${targetIndex}`);
+    if (!resultDiv) {
+        showToast('Could not find result container', 'error');
+        return;
+    }
+
+    // Show loading state
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i> Analyzing threat intelligence...</div>';
+
+    try {
+        const result = await apiRequest(`/api/admin/threat-intel/${ip}`);
+        displayThreatIntelResults(result, resultDiv, ip);
+    } catch (error) {
+        resultDiv.innerHTML = `<div class="error-message"><i class="fas fa-exclamation-triangle"></i> Failed to analyze: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+/**
+ * Display threat intelligence results
+ */
+function displayThreatIntelResults(result, container, ip) {
+    const score = result.combinedThreatScore || 0;
+    const recommendation = result.recommendation || 'UNKNOWN';
+
+    // Determine threat level color
+    let scoreClass = 'safe';
+    if (score >= 85) scoreClass = 'critical';
+    else if (score >= 50) scoreClass = 'warning';
+
+    let html = `
+        <div class="threat-intel-report">
+            <div class="threat-header">
+                <h4><i class="fas fa-shield-virus"></i> Threat Intelligence Report for ${escapeHtml(ip)}</h4>
+                <div class="threat-score ${scoreClass}">
+                    <span class="score-value">${score}</span>
+                    <span class="score-label">Threat Score</span>
+                </div>
+            </div>
+            
+            <div class="threat-recommendation ${recommendation.toLowerCase()}">
+                <strong>Recommendation:</strong> ${escapeHtml(recommendation)}
+            </div>
+
+            <div class="threat-summary">
+                <p><strong>Country:</strong> ${escapeHtml(result.summary.country)}</p>
+                <p><strong>ISP:</strong> ${escapeHtml(result.summary.isp)}</p>
+                <p><strong>Tags:</strong> ${result.summary.tags.length > 0 ? result.summary.tags.map(t => `<span class="tag">${escapeHtml(t)}</span>`).join(' ') : 'None'}</p>
+            </div>
+
+            <div class="threat-sources">
+                <h5>Intelligence Sources</h5>
+    `;
+
+    // AbuseIPDB
+    if (result.sources.abuseipdb.available) {
+        const abuseDB = result.sources.abuseipdb;
+        html += `
+            <div class="source-result">
+                <h6><i class="fas fa-database"></i> AbuseIPDB</h6>
+                <p>Abuse Score: <strong>${abuseDB.score}%</strong></p>
+                <p>Total Reports: ${abuseDB.reports}</p>
+                <p>Usage Type: ${escapeHtml(abuseDB.usageType)}</p>
+                ${abuseDB.isWhitelisted ? '<p class="text-success">✓ Whitelisted on AbuseIPDB</p>' : ''}
+            </div>
+        `;
+    } else {
+        html += `<div class="source-result"><h6><i class="fas fa-database"></i> AbuseIPDB</h6><p class="text-muted">Not available</p></div>`;
+    }
+
+    // AlienVault OTX
+    if (result.sources.otx.available) {
+        const otx = result.sources.otx;
+        html += `
+            <div class="source-result">
+                <h6><i class="fas fa-satellite"></i> AlienVault OTX</h6>
+                <p>Pulse Count: <strong>${otx.pulseCount}</strong></p>
+                <p>Threat Score: ${otx.threatScore}%</p>
+                ${otx.pulses.length > 0 ? `
+                    <p>Recent Pulses:</p>
+                    <ul>
+                        ${otx.pulses.slice(0, 3).map(p => `<li>${escapeHtml(p.name)}</li>`).join('')}
+                    </ul>
+                ` : ''}
+            </div>
+        `;
+    } else {
+        html += `<div class="source-result"><h6><i class="fas fa-satellite"></i> AlienVault OTX</h6><p class="text-muted">Not available</p></div>`;
+    }
+
+    // VirusTotal
+    if (result.sources.virustotal.available) {
+        const vt = result.sources.virustotal;
+        html += `
+            <div class="source-result">
+                <h6><i class="fas fa-virus"></i> VirusTotal</h6>
+                <p>Malicious Detections: <strong class="text-danger">${vt.malicious}</strong></p>
+                <p>Suspicious Detections: <strong class="text-warning">${vt.suspicious}</strong></p>
+                <p>Harmless: ${vt.harmless} | Undetected: ${vt.undetected}</p>
+                <p>Threat Score: ${vt.threatScore}%</p>
+            </div>
+        `;
+    } else {
+        html += `<div class="source-result"><h6><i class="fas fa-virus"></i> VirusTotal</h6><p class="text-muted">Not available</p></div>`;
+    }
+
+    html += `
+            </div>
+            
+            <div class="threat-actions" style="margin-top: 15px; display: flex; gap: 10px;">
+                ${recommendation === 'BLACKLIST' ? `
+                    <button class="btn-danger" onclick="addToBlacklist('${escapeHtml(ip)}', event)">
+                        <i class="fas fa-ban"></i> Add to Blacklist (Recommended)
+                    </button>
+                ` : ''}
+                <button class="btn-secondary" onclick="document.getElementById('threat-intel-${container.id.split('-')[2]}').style.display='none'">
+                    <i class="fas fa-times"></i> Close
+                </button>
+            </div>
+        </div>
+    `;
+
+    container.innerHTML = html;
 }
 
 // ============================================================================

@@ -98,7 +98,14 @@ const config = {
     // Threat intelligence
     threatFeedsEnabled: process.env.ENABLE_THREAT_FEEDS === 'true',
     abuseIPDBKey: process.env.ABUSEIPDB_API_KEY || '',
-    threatScoreThreshold: parseInt(process.env.THREAT_SCORE_THRESHOLD) || 75
+    otxAPIKey: process.env.OTX_API_KEY || '',
+    virusTotalAPIKey: process.env.VIRUSTOTAL_API_KEY || '',
+    threatScoreThreshold: parseInt(process.env.THREAT_SCORE_THRESHOLD) || 75,
+    
+    // IOC Correlation
+    iocCorrelationEnabled: process.env.ENABLE_IOC_CORRELATION === 'true',
+    autoBlacklistThreshold: parseInt(process.env.AUTO_BLACKLIST_THRESHOLD) || 85,
+    threatIntelCacheTTL: parseInt(process.env.THREAT_INTEL_CACHE_TTL) || 3600
   },
 
   // Logging Configuration
