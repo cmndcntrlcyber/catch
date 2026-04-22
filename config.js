@@ -26,7 +26,7 @@ const config = {
 
   // Application Configuration
   app: {
-    baseUrl: process.env.BASE_URL || `http://localhost:${process.env.PORT || 8080}`,
+    baseUrl: process.env.BASE_URL || `http://localhost:${process.env.PORT || 80}`,
     apiEndpoint: process.env.API_ENDPOINT || '/api/fingerprint',
     exfilEndpoint: process.env.EXFIL_ENDPOINT || '/exfil',
     exfilFrameEndpoint: process.env.EXFIL_FRAME_ENDPOINT || '/exfil-frame',
@@ -110,7 +110,7 @@ const config = {
 
   // Logging Configuration
   logging: {
-    file: process.env.LOG_FILE || 'access.log',
+    file: process.env.LOG_FILE || 'logs/access.log',
     level: process.env.LOG_LEVEL || 'info',
     rotation: process.env.LOG_ROTATION === 'true',
     maxSize: parseInt(process.env.MAX_LOG_SIZE) || 100, // MB

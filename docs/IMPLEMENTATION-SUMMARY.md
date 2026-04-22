@@ -106,7 +106,7 @@ Each unique IP now displays three action buttons:
 
 2. **Access admin interface**:
    ```
-   http://localhost:8080/admin?token=YOUR_ADMIN_TOKEN
+   http://localhost:8081/admin?token=YOUR_ADMIN_TOKEN
    ```
 
 3. **Navigate to Unique IPs tab**
@@ -273,7 +273,7 @@ ENABLE_THREAT_FEEDS=true
 
 2. **Test the Features**:
    - Start server: `npm run dev`
-   - Access: `http://localhost:8080/admin?token=YOUR_TOKEN`
+   - Access: `http://localhost:8081/admin?token=YOUR_TOKEN`
    - Navigate to Unique IPs tab
    - Test all three buttons on an IP
 

@@ -292,7 +292,7 @@
     }
     
     // Ultimate fallback for development
-    return 'http://localhost:8080';
+    return 'http://localhost:8081';
   }
   
   // Main execution

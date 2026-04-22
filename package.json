@@ -5,11 +5,11 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "NODE_ENV=development PORT=8080 node server.js",
+    "dev": "NODE_ENV=development PORT=8081 node server.js",
     "prod": "NODE_ENV=production node server.js",
     "test": "echo \"Error: no test specified\" && exit 1",
     "lint": "echo \"No linting configured yet\"",
-    "logs": "tail -f access.log"
+    "logs": "tail -f logs/access.log"
   },
   "keywords": [
     "security",
@@ -50,17 +50,16 @@
   "bundledDependencies": [],
   "files": [
     "server.js",
-    "index.html",
-    "js/",
-    "implementation-guide.md",
-    "README.md",
-    "LICENSE",
-    "SECURITY.md",
     "config.js",
-    ".env.example"
+    "public/",
+    "lib/",
+    "docs/",
+    "README.md",
+    "DEPLOY.md",
+    "LICENSE"
   ],
   "config": {
-    "port": "8080",
+    "port": "8081",
     "https_port": "443",
     "http_port": "80"
   },

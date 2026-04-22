@@ -489,7 +489,7 @@ function sendBlockedResponse(res, reason, clientIP, timestamp) {
 
   // Log blocked request to separate file
   const blockLogEntry = `${timestamp} | IP: ${clientIP} | STATUS: BLOCKED | REASON: ${reason}\n`;
-  fs.appendFile('blocked-requests.log', blockLogEntry, (err) => {
+  fs.appendFile('logs/blocked-requests.log', blockLogEntry, (err) => {
     if (err) console.error('Error writing to blocked log:', err);
   });
 
@@ -532,33 +532,69 @@ function checkAdminAuth(req) {
   return token === ADMIN_TOKEN;
 }
 
+const STATS_RANGES = {
+  '1h':  { windowMs:      60 * 60 * 1000, bucketMs:      60 * 1000 },
+  '24h': { windowMs: 24 * 60 * 60 * 1000, bucketMs: 15 * 60 * 1000 },
+  '7d':  { windowMs: 7 * 24 * 60 * 60 * 1000, bucketMs: 60 * 60 * 1000 },
+  'all': { windowMs: null,                bucketMs: 24 * 60 * 60 * 1000 }
+};
+
+function formatBucketLabel(ms, bucketMs) {
+  const d = new Date(ms);
+  const pad = n => String(n).padStart(2, '0');
+  if (bucketMs < 60 * 60 * 1000) {
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+  if (bucketMs < 24 * 60 * 60 * 1000) {
+    return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:00`;
+  }
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
 /**
  * Calculate statistics from log file
  * @param {Array<string>} lines - Log file lines
+ * @param {string} [range] - Time range key: '1h' | '24h' | '7d' | 'all'
  * @returns {Object} Statistics object
  */
-function calculateStats(lines) {
+function calculateStats(lines, range = '24h') {
+  const rangeDef = STATS_RANGES[range] || STATS_RANGES['24h'];
+  const now = Date.now();
+  const cutoff = rangeDef.windowMs ? now - rangeDef.windowMs : null;
+  const buckets = new Map();
+  let earliestBucket = null;
+  let latestBucket = null;
+
   const stats = {
-    totalRequests: lines.length,
+    totalRequests: 0,
     blockedRequests: 0,
     uniqueIPs: new Set(),
     threatScore: 0,
     topAttackers: {},
     attackPatterns: {},
-    requestTrends: []
+    requestTrends: [],
+    range
   };
 
   lines.forEach(line => {
     const log = parseLogLine(line);
     if (!log) return;
 
+    const ts = log.timestamp ? Date.parse(log.timestamp) : NaN;
+    if (Number.isNaN(ts)) return;
+    if (cutoff !== null && ts < cutoff) return;
+
+    stats.totalRequests++;
+
     // Count unique IPs
     if (log.IP) {
       stats.uniqueIPs.add(log.IP);
     }
 
+    const blocked = log.STATUS === 'BLOCKED';
+
     // Count blocked requests
-    if (log.STATUS === 'BLOCKED') {
+    if (blocked) {
       stats.blockedRequests++;
 
       // Track top attackers
@@ -572,7 +608,38 @@ function calculateStats(lines) {
         stats.attackPatterns[pattern] = (stats.attackPatterns[pattern] || 0) + 1;
       }
     }
+
+    // Bucket by floor(timestamp / bucketMs)
+    const bucketKey = Math.floor(ts / rangeDef.bucketMs) * rangeDef.bucketMs;
+    let bucket = buckets.get(bucketKey);
+    if (!bucket) {
+      bucket = { total: 0, blocked: 0 };
+      buckets.set(bucketKey, bucket);
+    }
+    bucket.total++;
+    if (blocked) bucket.blocked++;
+
+    if (earliestBucket === null || bucketKey < earliestBucket) earliestBucket = bucketKey;
+    if (latestBucket === null || bucketKey > latestBucket) latestBucket = bucketKey;
   });
+
+  // Build a contiguous series so the x-axis has no gaps.
+  if (earliestBucket !== null) {
+    const start = cutoff !== null
+      ? Math.floor(cutoff / rangeDef.bucketMs) * rangeDef.bucketMs
+      : earliestBucket;
+    const end = cutoff !== null
+      ? Math.floor(now / rangeDef.bucketMs) * rangeDef.bucketMs
+      : latestBucket;
+    for (let t = start; t <= end; t += rangeDef.bucketMs) {
+      const b = buckets.get(t) || { total: 0, blocked: 0 };
+      stats.requestTrends.push({
+        time: formatBucketLabel(t, rangeDef.bucketMs),
+        total: b.total,
+        blocked: b.blocked
+      });
+    }
+  }
 
   // Convert unique IPs set to count
   stats.uniqueIPs = stats.uniqueIPs.size;
@@ -587,6 +654,12 @@ function calculateStats(lines) {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 10)
     .map(([ip, count]) => ({ ip, count }));
+
+  // Sort and limit attack patterns
+  stats.attackPatterns = Object.entries(stats.attackPatterns)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([pattern, count]) => ({ pattern, count }));
 
   return stats;
 }
@@ -836,7 +909,7 @@ async function handleRequest(req, res) {
       fs.appendFile(config.logging.file, logEntry, (err) => {
         if (err) console.error('Error writing to log file:', err);
       });
-      serveStaticFile(req, res, path.join(__dirname, 'index.html'));
+      serveStaticFile(req, res, path.join(__dirname, 'public', 'index.html'));
       return;
     }
     
@@ -853,7 +926,7 @@ async function handleRequest(req, res) {
     
     // Serve static files from js directory
     if (url.pathname.startsWith('/js/')) {
-      const filePath = path.join(__dirname, url.pathname);
+      const filePath = path.join(__dirname, 'public', url.pathname);
       if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
         logRequestDetails(req, clientIP, timestamp);
         const logEntry = createLogEntry(req, clientIP, timestamp);
@@ -918,7 +991,7 @@ async function handleRequest(req, res) {
         res.end('Unauthorized - Invalid admin token');
         return;
       }
-      serveStaticFile(req, res, path.join(__dirname, 'admin.html'));
+      serveStaticFile(req, res, path.join(__dirname, 'public', 'admin.html'));
       return;
     }
 
@@ -1063,21 +1136,59 @@ async function handleRequest(req, res) {
         return;
       }
 
-      fs.readFile(config.logging.file, 'utf8', (err, data) => {
-        if (err) {
-          res.writeHead(500, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Failed to read logs' }));
-          return;
-        }
+      const requestedRange = url.query.range;
+      const range = Object.prototype.hasOwnProperty.call(STATS_RANGES, requestedRange)
+        ? requestedRange
+        : '24h';
 
-        const lines = data.trim().split('\n').filter(line => line.length > 0);
-        const stats = calculateStats(lines);
+      // Cap bytes read per range so short ranges don't scan the whole log.
+      const MAX_BYTES = {
+        '1h':  256 * 1024,
+        '24h':   2 * 1024 * 1024,
+        '7d':   16 * 1024 * 1024,
+        'all': Infinity
+      };
+      const maxBytes = MAX_BYTES[range];
+
+      const handleData = data => {
+        const lines = data.split('\n').filter(line => line.length > 0);
+        const stats = calculateStats(lines, range);
 
         res.writeHead(200, {
           'Content-Type': 'application/json',
           'Cache-Control': 'no-store'
         });
         res.end(JSON.stringify(stats));
+      };
+
+      const handleErr = () => {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Failed to read logs' }));
+      };
+
+      fs.stat(config.logging.file, (statErr, st) => {
+        if (statErr) return handleErr();
+
+        if (st.size <= maxBytes) {
+          fs.readFile(config.logging.file, 'utf8', (err, data) => {
+            if (err) return handleErr();
+            handleData(data);
+          });
+          return;
+        }
+
+        // Tail-read the last maxBytes, then drop the first (partial) line.
+        const stream = fs.createReadStream(config.logging.file, {
+          start: st.size - maxBytes,
+          encoding: 'utf8'
+        });
+        let buf = '';
+        stream.on('data', chunk => { buf += chunk; });
+        stream.on('error', handleErr);
+        stream.on('end', () => {
+          const nl = buf.indexOf('\n');
+          handleData(nl === -1 ? '' : buf.slice(nl + 1));
+        });
       });
       return;
     }
@@ -1427,7 +1538,7 @@ server.on('connection', (socket) => {
 server.on('error', (error) => {
   console.error('Server error:', error);
   if (error.code === 'EADDRINUSE') {
-    console.error(`Port ${useHttps ? config.server.port : (config.server.port === 443 ? 8080 : config.server.port)} already in use`);
+    console.error(`Port ${useHttps ? config.server.port : (config.server.port === 443 ? 80 : config.server.port)} already in use`);
     process.exit(1);
   }
 });

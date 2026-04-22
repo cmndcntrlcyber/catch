@@ -15,7 +15,7 @@ LETSENCRYPT_DOMAIN="catch.attck-deploy.net"
 LETSENCRYPT_PATH="/etc/letsencrypt/live/${LETSENCRYPT_DOMAIN}"
 APP_DIR="/home/cmndcntrl/code/catch"
 SSL_DIR="${APP_DIR}/ssl"
-LOG_FILE="${APP_DIR}/ssl-renewal.log"
+LOG_FILE="${APP_DIR}/logs/ssl-renewal.log"
 USER="cmndcntrl"
 GROUP="cmndcntrl"
 

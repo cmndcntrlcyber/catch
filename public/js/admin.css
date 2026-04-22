@@ -517,6 +517,34 @@ header h1 i {
     color: var(--primary-color);
 }
 
+.chart-controls {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 15px;
+}
+
+.btn-range {
+    padding: 6px 14px;
+    border: 2px solid var(--border-color);
+    border-radius: 6px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-range:hover {
+    border-color: var(--primary-color);
+}
+
+.btn-range.active {
+    background: var(--primary-color);
+    border-color: var(--primary-color);
+    color: #fff;
+}
+
 /* Attacker/Pattern Items */
 .attacker-item,
 .pattern-item {
@@ -530,15 +558,69 @@ header h1 i {
     border-left: 4px solid var(--danger-color);
 }
 
+.attacker-item,
+.pattern-item {
+    gap: 12px;
+}
+
 .attacker-rank,
 .pattern-name {
     font-weight: 500;
 }
 
+.attacker-rank {
+    flex: 0 0 auto;
+    min-width: 34px;
+    color: var(--text-secondary);
+}
+
+.attacker-ip {
+    flex: 0 0 auto;
+    min-width: 130px;
+    font-family: 'Courier New', monospace;
+}
+
+.pattern-name {
+    flex: 0 0 auto;
+    min-width: 180px;
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.stat-bar {
+    flex: 1 1 auto;
+    height: 8px;
+    background: var(--border-color);
+    border-radius: 4px;
+    overflow: hidden;
+    min-width: 60px;
+}
+
+.stat-bar-fill {
+    height: 100%;
+    background: var(--danger-color);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.stat-bar-fill--warn {
+    background: var(--primary-color);
+}
+
 .attacker-count,
 .pattern-count {
+    flex: 0 0 auto;
     color: var(--text-secondary);
     font-size: 0.95rem;
+    min-width: 110px;
+    text-align: right;
+}
+
+.stat-pct {
+    opacity: 0.7;
+    font-size: 0.85rem;
 }
 
 /* Config Section */

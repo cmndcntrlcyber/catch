@@ -21,6 +21,7 @@ let currentConfig = {};
 let currentLogs = [];
 let currentStats = {};
 let requestChart = null;
+let statsRange = '24h';
 
 // ============================================================================
 // DARK MODE
@@ -487,7 +488,7 @@ function searchLogs() {
 
 async function loadStatistics() {
     try {
-        const stats = await apiRequest('/api/admin/stats');
+        const stats = await apiRequest('/api/admin/stats?range=' + encodeURIComponent(statsRange));
         currentStats = stats;
 
         // Display request trends chart
@@ -503,12 +504,33 @@ async function loadStatistics() {
     }
 }
 
+function initTrendsRangeSelector() {
+    const container = document.getElementById('trends-range');
+    if (!container || container.dataset.bound === '1') return;
+    container.dataset.bound = '1';
+    container.addEventListener('click', (e) => {
+        const btn = e.target.closest('.btn-range');
+        if (!btn || !container.contains(btn)) return;
+        const range = btn.dataset.range;
+        if (!range || range === statsRange) return;
+        statsRange = range;
+        container.querySelectorAll('.btn-range').forEach(b => {
+            b.classList.toggle('active', b === btn);
+        });
+        loadStatistics();
+    });
+}
+
 function displayRequestChart(trends) {
     const ctx = document.getElementById('request-chart');
 
     if (requestChart) {
         requestChart.destroy();
     }
+
+    const styles = getComputedStyle(document.documentElement);
+    const textColor = styles.getPropertyValue('--text-primary').trim();
+    const axisColor = styles.getPropertyValue('--text-secondary').trim();
 
     requestChart = new Chart(ctx, {
         type: 'line',
@@ -519,29 +541,53 @@ function displayRequestChart(trends) {
                     label: 'Total Requests',
                     data: trends.map(t => t.total),
                     borderColor: 'rgb(75, 192, 192)',
-                    tension: 0.1
+                    backgroundColor: 'rgba(75, 192, 192, 0.15)',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    pointHoverRadius: 4,
+                    tension: 0.25,
+                    fill: true
                 },
                 {
                     label: 'Blocked Requests',
                     data: trends.map(t => t.blocked),
                     borderColor: 'rgb(255, 99, 132)',
-                    tension: 0.1
+                    backgroundColor: 'rgba(255, 99, 132, 0.15)',
+                    borderWidth: 2,
+                    pointRadius: 0,
+                    pointHoverRadius: 4,
+                    tension: 0.25,
+                    fill: true
                 }
             ]
         },
         options: {
             responsive: true,
+            interaction: { mode: 'index', intersect: false },
             plugins: {
                 legend: {
                     display: true,
-                    labels: {
-                        color: getComputedStyle(document.documentElement).getPropertyValue('--text-primary').trim()
+                    labels: { color: textColor }
+                },
+                tooltip: {
+                    callbacks: {
+                        title: (items) => items.length ? items[0].label : ''
                     }
                 }
             },
             scales: {
-                x: { ticks: { color: getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() } },
-                y: { ticks: { color: getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim() } }
+                x: {
+                    ticks: {
+                        color: axisColor,
+                        maxTicksLimit: 12,
+                        autoSkip: true,
+                        maxRotation: 0
+                    }
+                },
+                y: {
+                    beginAtZero: true,
+                    ticks: { color: axisColor, precision: 0 }
+                }
             }
         }
     });
@@ -550,34 +596,57 @@ function displayRequestChart(trends) {
 function displayTopAttackers(attackers) {
     const container = document.getElementById('top-attackers');
 
-    if (attackers.length === 0) {
+    if (!attackers || attackers.length === 0) {
         container.innerHTML = '<p class="no-data">No attack data available</p>';
         return;
     }
 
-    container.innerHTML = attackers.map((attacker, index) => `
-        <div class="attacker-item">
-            <span class="attacker-rank">#${index + 1}</span>
-            <span class="attacker-ip">${escapeHtml(attacker.ip)}</span>
-            <span class="attacker-count">${attacker.count} requests</span>
-        </div>
-    `).join('');
+    const max = attackers[0].count || 1;
+    const total = attackers.reduce((s, a) => s + a.count, 0);
+
+    container.innerHTML = attackers.map((attacker, index) => {
+        const pct = total ? Math.round((attacker.count / total) * 100) : 0;
+        const width = Math.max(2, Math.round((attacker.count / max) * 100));
+        return `
+            <div class="attacker-item">
+                <span class="attacker-rank">#${index + 1}</span>
+                <span class="attacker-ip">${escapeHtml(attacker.ip)}</span>
+                <div class="stat-bar"><div class="stat-bar-fill" style="width:${width}%"></div></div>
+                <span class="attacker-count">${attacker.count.toLocaleString()} <span class="stat-pct">(${pct}%)</span></span>
+            </div>
+        `;
+    }).join('');
 }
 
 function displayAttackPatterns(patterns) {
     const container = document.getElementById('attack-patterns');
 
-    if (Object.keys(patterns).length === 0) {
+    // Accept both legacy object and new array shape for safety.
+    const list = Array.isArray(patterns)
+        ? patterns
+        : Object.entries(patterns || {})
+            .sort((a, b) => b[1] - a[1])
+            .map(([pattern, count]) => ({ pattern, count }));
+
+    if (list.length === 0) {
         container.innerHTML = '<p class="no-data">No attack patterns detected</p>';
         return;
     }
 
-    container.innerHTML = Object.entries(patterns).map(([pattern, count]) => `
-        <div class="pattern-item">
-            <span class="pattern-name">${pattern}</span>
-            <span class="pattern-count">${count} occurrences</span>
-        </div>
-    `).join('');
+    const max = list[0].count || 1;
+    const total = list.reduce((s, p) => s + p.count, 0);
+
+    container.innerHTML = list.map((p) => {
+        const pct = total ? Math.round((p.count / total) * 100) : 0;
+        const width = Math.max(2, Math.round((p.count / max) * 100));
+        return `
+            <div class="pattern-item">
+                <span class="pattern-name">${escapeHtml(p.pattern)}</span>
+                <div class="stat-bar"><div class="stat-bar-fill stat-bar-fill--warn" style="width:${width}%"></div></div>
+                <span class="pattern-count">${p.count.toLocaleString()} <span class="stat-pct">(${pct}%)</span></span>
+            </div>
+        `;
+    }).join('');
 }
 
 // ============================================================================
@@ -1059,6 +1128,7 @@ function displayThreatIntelResults(result, container, ip) {
 // Load dashboard on page load
 document.addEventListener('DOMContentLoaded', () => {
     loadDashboard();
+    initTrendsRangeSelector();
 
     // Auto-refresh dashboard every 30 seconds
     setInterval(() => {

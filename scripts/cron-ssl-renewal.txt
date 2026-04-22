@@ -19,10 +19,10 @@
 
 # Run SSL certificate renewal script daily at 3:00 AM
 # Format: minute hour day month weekday command
-0 3 * * * sudo /home/cmndcntrl/code/catch/renew-ssl-certs.sh >> /home/cmndcntrl/code/catch/ssl-renewal.log 2>&1
+0 3 * * * sudo /home/cmndcntrl/code/catch/scripts/renew-ssl-certs.sh >> /home/cmndcntrl/code/catch/logs/ssl-renewal.log 2>&1
 
 # Alternative: Run every 12 hours (at 3:00 AM and 3:00 PM) for more frequent checks
-# 0 3,15 * * * sudo /home/cmndcntrl/code/catch/renew-ssl-certs.sh >> /home/cmndcntrl/code/catch/ssl-renewal.log 2>&1
+# 0 3,15 * * * sudo /home/cmndcntrl/code/catch/scripts/renew-ssl-certs.sh >> /home/cmndcntrl/code/catch/logs/ssl-renewal.log 2>&1
 
 # Alternative: Run weekly on Monday at 3:00 AM (less frequent, but sufficient for 90-day certs)
-# 0 3 * * 1 sudo /home/cmndcntrl/code/catch/renew-ssl-certs.sh >> /home/cmndcntrl/code/catch/ssl-renewal.log 2>&1
+# 0 3 * * 1 sudo /home/cmndcntrl/code/catch/scripts/renew-ssl-certs.sh >> /home/cmndcntrl/code/catch/logs/ssl-renewal.log 2>&1

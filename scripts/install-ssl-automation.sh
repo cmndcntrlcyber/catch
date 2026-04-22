@@ -16,6 +16,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_DIR="$(dirname "$SCRIPT_DIR")"
 RENEWAL_SCRIPT="${SCRIPT_DIR}/renew-ssl-certs.sh"
 SUDOERS_FILE="/etc/sudoers.d/catch-ssl-renewal"
 USER="cmndcntrl"
@@ -78,7 +79,7 @@ fi
 print_info "Setting up cron job for user: $USER"
 
 # Create cron entry
-CRON_ENTRY="0 3 * * * sudo ${RENEWAL_SCRIPT} >> ${SCRIPT_DIR}/ssl-renewal.log 2>&1"
+CRON_ENTRY="0 3 * * * sudo ${RENEWAL_SCRIPT} >> ${APP_DIR}/logs/ssl-renewal.log 2>&1"
 
 # Check if cron entry already exists
 if sudo -u "$USER" crontab -l 2>/dev/null | grep -q "$RENEWAL_SCRIPT"; then
@@ -91,10 +92,10 @@ fi
 
 # Step 4: Create log file with proper permissions
 print_info "Setting up log file..."
-touch "${SCRIPT_DIR}/ssl-renewal.log"
-chown "$USER:$USER" "${SCRIPT_DIR}/ssl-renewal.log"
-chmod 644 "${SCRIPT_DIR}/ssl-renewal.log"
-print_success "Log file created: ${SCRIPT_DIR}/ssl-renewal.log"
+touch "${APP_DIR}/logs/ssl-renewal.log"
+chown "$USER:$USER" "${APP_DIR}/logs/ssl-renewal.log"
+chmod 644 "${APP_DIR}/logs/ssl-renewal.log"
+print_success "Log file created: ${APP_DIR}/logs/ssl-renewal.log"
 
 # Step 5: Test the renewal script
 echo ""
@@ -117,12 +118,12 @@ echo ""
 echo "Configuration summary:"
 echo "  • Renewal script: $RENEWAL_SCRIPT"
 echo "  • Cron schedule: Daily at 3:00 AM"
-echo "  • Log file: ${SCRIPT_DIR}/ssl-renewal.log"
+echo "  • Log file: ${APP_DIR}/logs/ssl-renewal.log"
 echo "  • Sudoers file: $SUDOERS_FILE"
 echo ""
 echo "Next steps:"
 echo "  1. Monitor the first automated run after 3:00 AM"
-echo "  2. Check logs with: tail -f ${SCRIPT_DIR}/ssl-renewal.log"
+echo "  2. Check logs with: tail -f ${APP_DIR}/logs/ssl-renewal.log"
 echo "  3. Verify cron job with: crontab -l"
 echo "  4. Test manual run with: sudo ${RENEWAL_SCRIPT}"
 echo ""

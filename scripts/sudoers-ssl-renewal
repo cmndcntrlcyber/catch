@@ -21,4 +21,4 @@
 #
 
 # Allow cmndcntrl user to run the SSL renewal script without password
-cmndcntrl ALL=(ALL) NOPASSWD: /home/cmndcntrl/code/catch/renew-ssl-certs.sh
+cmndcntrl ALL=(ALL) NOPASSWD: /home/cmndcntrl/code/catch/scripts/renew-ssl-certs.sh
