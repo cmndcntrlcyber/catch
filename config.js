@@ -2,6 +2,7 @@
 // Handles environment variables and configuration settings
 
 require('dotenv').config();
+const crypto = require('crypto');
 
 /**
  * Configuration object that combines environment variables with sensible defaults
@@ -125,6 +126,16 @@ const config = {
     enableFetchApi: process.env.ENABLE_FETCH_API !== 'false',
     enableXhrMethod: process.env.ENABLE_XHR_METHOD !== 'false',
     enableIframeMethod: process.env.ENABLE_IFRAME_METHOD !== 'false'
+  },
+
+  // Data Scrubbing Configuration
+  scrubbing: {
+    enabled: process.env.SCRUBBING_ENABLED !== 'false',
+    level: process.env.SCRUBBING_LEVEL || 'partial',
+    ipSalt: process.env.SCRUBBING_IP_SALT || crypto.randomBytes(16).toString('hex'),
+    scrubConsoleOutput: process.env.SCRUBBING_CONSOLE !== 'false',
+    scrubApiResponses: process.env.SCRUBBING_API_RESPONSES !== 'false',
+    scrubLogFiles: process.env.SCRUBBING_LOG_FILES !== 'false',
   },
 
   // Development Configuration

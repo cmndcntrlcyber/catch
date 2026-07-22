@@ -7,6 +7,7 @@ const path = require('path');
 const { parse } = require('url');
 const dns = require('dns');
 const { config, getBaseUrl, getEndpointUrl, isDevelopment, isProduction, shouldUseHttps } = require('./config');
+const scrubber = require('./lib/data-scrubber');
 
 // Function to extract the real client IP address
 function getClientIP(req) {
@@ -77,18 +78,22 @@ function createLogEntry(req, clientIP, timestamp, body = '') {
   const referer = req.headers.referer || req.headers.referrer || '';
   const origin = req.headers.origin || '';
   const contentType = req.headers['content-type'] || '';
-  
-  let logEntry = `${timestamp} | IP: ${clientIP} | Method: ${method} | Host: ${hostname} | URL: ${req.url}`;
-  logEntry += ` | UA: ${userAgent}`;
-  
+
+  const logIP = scrubber.scrubIP(clientIP);
+  const logUA = scrubber.scrubUserAgent(userAgent);
+  const logBody = body.length > 0 ? scrubber.scrubBody(body.substring(0, 500)) : '';
+
+  let logEntry = `${timestamp} | IP: ${logIP} | Method: ${method} | Host: ${hostname} | URL: ${req.url}`;
+  logEntry += ` | UA: ${logUA}`;
+
   if (contentType) logEntry += ` | Content-Type: ${contentType}`;
   if (referer) logEntry += ` | Referer: ${referer}`;
   if (origin) logEntry += ` | Origin: ${origin}`;
-  if (body.length > 0) {
-    logEntry += ` | Body: ${body.substring(0, 500)}${body.length > 500 ? '...[truncated]' : ''}`;
+  if (logBody.length > 0) {
+    logEntry += ` | Body: ${logBody}${body.length > 500 ? '...[truncated]' : ''}`;
   }
   logEntry += '\n';
-  
+
   return logEntry;
 }
 
@@ -173,7 +178,7 @@ function recordViolation(clientIP) {
     // Add to blocked IPs list
     if (!config.blocking.blockedIPs.includes(clientIP)) {
       config.blocking.blockedIPs.push(clientIP);
-      console.log(`🚨 AUTO-BLOCKED IP after ${entry.count} violations: ${clientIP}`);
+      console.log(`🚨 AUTO-BLOCKED IP after ${entry.count} violations: ${scrubber.scrubIP(clientIP)}`);
 
       // Schedule unblock
       if (config.blocking.autoBlockDuration > 0) {
@@ -182,7 +187,7 @@ function recordViolation(clientIP) {
           if (index > -1) {
             config.blocking.blockedIPs.splice(index, 1);
             violationStore.delete(clientIP);
-            console.log(`✅ AUTO-UNBLOCKED IP after timeout: ${clientIP}`);
+            console.log(`✅ AUTO-UNBLOCKED IP after timeout: ${scrubber.scrubIP(clientIP)}`);
           }
         }, config.blocking.autoBlockDuration);
       }
@@ -485,10 +490,10 @@ function sendBlockedResponse(res, reason, clientIP, timestamp) {
   const responseCode = config.blocking.responseCode;
   const responseMessage = responseCode === 444 ? '' : `Blocked: ${reason}`;
 
-  console.log(`[${timestamp}] 🚫 BLOCKED REQUEST from ${clientIP}: ${reason}`);
+  console.log(`[${timestamp}] 🚫 BLOCKED REQUEST from ${scrubber.scrubIP(clientIP)}: ${reason}`);
 
   // Log blocked request to separate file
-  const blockLogEntry = `${timestamp} | IP: ${clientIP} | STATUS: BLOCKED | REASON: ${reason}\n`;
+  const blockLogEntry = `${timestamp} | IP: ${scrubber.scrubIP(clientIP)} | STATUS: BLOCKED | REASON: ${reason}\n`;
   fs.appendFile('logs/blocked-requests.log', blockLogEntry, (err) => {
     if (err) console.error('Error writing to blocked log:', err);
   });
@@ -738,17 +743,17 @@ function serveFingerprintAPI(req, res, clientIP, timestamp) {
   const fingerprintData = {
     timestamp: timestamp,
     server: {
-      clientIP: clientIP,
-      userAgent: req.headers['user-agent'] || 'unknown',
+      clientIP: scrubber.scrubIP(clientIP),
+      userAgent: scrubber.scrubUserAgent(req.headers['user-agent'] || 'unknown'),
       acceptLanguage: req.headers['accept-language'] || 'unknown',
       acceptEncoding: req.headers['accept-encoding'] || 'unknown',
       connection: req.headers.connection || 'unknown',
       host: req.headers.host || 'unknown',
       referer: req.headers.referer || req.headers.referrer || '',
       origin: req.headers.origin || '',
-      xForwardedFor: req.headers['x-forwarded-for'] || '',
-      xRealIP: req.headers['x-real-ip'] || '',
-      cfConnectingIP: req.headers['cf-connecting-ip'] || '',
+      xForwardedFor: scrubber.scrubIP(req.headers['x-forwarded-for'] || ''),
+      xRealIP: scrubber.scrubIP(req.headers['x-real-ip'] || ''),
+      cfConnectingIP: scrubber.scrubIP(req.headers['cf-connecting-ip'] || ''),
       cfRay: req.headers['cf-ray'] || '',
       cfIPCountry: req.headers['cf-ipcountry'] || '',
       dnt: req.headers.dnt || '',
@@ -756,7 +761,7 @@ function serveFingerprintAPI(req, res, clientIP, timestamp) {
       secFetchDest: req.headers['sec-fetch-dest'] || '',
       secFetchMode: req.headers['sec-fetch-mode'] || '',
       secFetchSite: req.headers['sec-fetch-site'] || '',
-      allHeaders: req.headers
+      allHeaders: scrubber.scrubHeaders(req.headers)
     },
     url: req.url,
     method: req.method,
@@ -783,24 +788,28 @@ function logRequestDetails(req, clientIP, timestamp, body = '') {
   const referer = req.headers.referer || req.headers.referrer || '';
   const origin = req.headers.origin || '';
   const contentType = req.headers['content-type'] || '';
-  
-  console.log(`[${timestamp}] ${method} request from IP: ${clientIP}`);
+
+  const logIP = scrubber.scrubIP(clientIP);
+  const logUA = scrubber.scrubUserAgent(userAgent);
+
+  console.log(`[${timestamp}] ${method} request from IP: ${logIP}`);
   console.log(`[${timestamp}] Host domain: ${hostname}`);
   console.log(`[${timestamp}] URL: ${req.url}`);
-  console.log(`[${timestamp}] User-Agent: ${userAgent}`);
-  
+  console.log(`[${timestamp}] User-Agent: ${logUA}`);
+
   if (contentType) console.log(`[${timestamp}] Content-Type: ${contentType}`);
   if (referer) console.log(`[${timestamp}] Referer: ${referer}`);
   if (origin) console.log(`[${timestamp}] Origin: ${origin}`);
-  
+
   const { query } = parse(req.url, true);
   if (Object.keys(query).length > 0) {
     console.log(`[${timestamp}] Query parameters:`, query);
   }
-  
+
   if (body.length > 0) {
+    const logBody = scrubber.scrubBody(body.substring(0, 1000));
     console.log(`[${timestamp}] ${method} body length: ${body.length} bytes`);
-    console.log(`[${timestamp}] ${method} body content:`, body.substring(0, 1000) + (body.length > 1000 ? '...[truncated]' : ''));
+    console.log(`[${timestamp}] ${method} body content:`, logBody + (body.length > 1000 ? '...[truncated]' : ''));
   }
 }
 
@@ -821,11 +830,11 @@ function sendResponse(res, req, clientIP, timestamp, body = '') {
   });
   
   let responseText = `${method} Request captured!\n`;
-  responseText += `Client IP: ${clientIP}\n`;
+  responseText += `Client IP: ${scrubber.scrubIP(clientIP)}\n`;
   responseText += `Hostname: ${hostname}\n`;
   responseText += `Timestamp: ${timestamp}\n`;
   responseText += `URL: ${req.url}\n`;
-  
+
   // Add method-specific information
   switch (method) {
     case 'POST':
@@ -833,7 +842,7 @@ function sendResponse(res, req, clientIP, timestamp, body = '') {
     case 'PATCH':
       if (body.length > 0) {
         responseText += `\n${method} Data Length: ${body.length} bytes\n`;
-        responseText += `${method} Data Preview: ${body.substring(0, 200)}${body.length > 200 ? '...[truncated]' : ''}\n`;
+        responseText += `${method} Data Preview: ${scrubber.scrubBody(body.substring(0, 200))}${body.length > 200 ? '...[truncated]' : ''}\n`;
       }
       break;
     case 'DELETE':
@@ -941,11 +950,12 @@ async function handleRequest(req, res) {
     // Handle data exfiltration endpoint (image beacon method)
     if (url.pathname === '/exfil') {
       logRequestDetails(req, clientIP, timestamp);
-      const exfilData = url.query.data ? decodeURIComponent(url.query.data) : 'No data';
-      
+      const exfilDataRaw = url.query.data ? decodeURIComponent(url.query.data) : 'No data';
+      const exfilData = scrubber.scrubExfilData(exfilDataRaw);
+
       console.log(`[${timestamp}] EXFILTRATION DATA RECEIVED:`, exfilData);
-      
-      const logEntry = `${timestamp} | IP: ${clientIP} | Method: EXFIL-BEACON | Host: ${req.headers.host || 'unknown'} | URL: ${req.url} | UA: ${req.headers['user-agent'] || 'unknown'} | EXFIL-DATA: ${exfilData.substring(0, 1000)}\n`;
+
+      const logEntry = `${timestamp} | IP: ${scrubber.scrubIP(clientIP)} | Method: EXFIL-BEACON | Host: ${req.headers.host || 'unknown'} | URL: ${req.url} | UA: ${scrubber.scrubUserAgent(req.headers['user-agent'] || 'unknown')} | EXFIL-DATA: ${exfilData.substring(0, 1000)}\n`;
       fs.appendFile(config.logging.file, logEntry, (err) => {
         if (err) console.error('Error writing to log file:', err);
       });
@@ -965,11 +975,12 @@ async function handleRequest(req, res) {
     // Handle data exfiltration iframe endpoint
     if (url.pathname === '/exfil-frame') {
       logRequestDetails(req, clientIP, timestamp);
-      const exfilData = url.query.data ? decodeURIComponent(url.query.data) : 'No data';
-      
+      const exfilDataRaw = url.query.data ? decodeURIComponent(url.query.data) : 'No data';
+      const exfilData = scrubber.scrubExfilData(exfilDataRaw);
+
       console.log(`[${timestamp}] EXFILTRATION DATA RECEIVED (IFRAME):`, exfilData);
-      
-      const logEntry = `${timestamp} | IP: ${clientIP} | Method: EXFIL-IFRAME | Host: ${req.headers.host || 'unknown'} | URL: ${req.url} | UA: ${req.headers['user-agent'] || 'unknown'} | EXFIL-DATA: ${exfilData.substring(0, 1000)}\n`;
+
+      const logEntry = `${timestamp} | IP: ${scrubber.scrubIP(clientIP)} | Method: EXFIL-IFRAME | Host: ${req.headers.host || 'unknown'} | URL: ${req.url} | UA: ${scrubber.scrubUserAgent(req.headers['user-agent'] || 'unknown')} | EXFIL-DATA: ${exfilData.substring(0, 1000)}\n`;
       fs.appendFile(config.logging.file, logEntry, (err) => {
         if (err) console.error('Error writing to log file:', err);
       });
@@ -1007,8 +1018,13 @@ async function handleRequest(req, res) {
         'Content-Type': 'application/json',
         'Cache-Control': 'no-store'
       });
+      const safeBlocking = Object.assign({}, config.blocking, {
+        abuseIPDBKey: scrubber.maskApiKey(config.blocking.abuseIPDBKey),
+        otxAPIKey: scrubber.maskApiKey(config.blocking.otxAPIKey),
+        virusTotalAPIKey: scrubber.maskApiKey(config.blocking.virusTotalAPIKey),
+      });
       res.end(JSON.stringify({
-        blocking: config.blocking,
+        blocking: safeBlocking,
         security: config.security
       }));
       return;
@@ -1049,7 +1065,7 @@ async function handleRequest(req, res) {
         // Get last N lines
         lines = lines.slice(-limit);
 
-        const logs = lines.map(line => parseLogLine(line)).filter(Boolean);
+        const logs = lines.map(line => parseLogLine(scrubber.scrubLogEntry(line))).filter(Boolean);
 
         res.writeHead(200, {
           'Content-Type': 'application/json',
@@ -1082,27 +1098,35 @@ async function handleRequest(req, res) {
           const log = parseLogLine(line);
           if (!log || !log.IP) return;
 
-          if (!ipMap[log.IP]) {
-            ipMap[log.IP] = { requests: [], firstSeen: log.timestamp, lastSeen: log.timestamp };
+          const displayIP = scrubber.scrubIP(log.IP);
+
+          if (!ipMap[displayIP]) {
+            ipMap[displayIP] = { requests: [], firstSeen: log.timestamp, lastSeen: log.timestamp };
           }
 
-          ipMap[log.IP].lastSeen = log.timestamp;
-          ipMap[log.IP].requests.push({
+          ipMap[displayIP].lastSeen = log.timestamp;
+          ipMap[displayIP].requests.push({
             timestamp: log.timestamp,
             method: log.Method || '',
             url: log.URL || '',
             host: log.HOST || log.Host || '',
-            ua: log.UA || '',
+            ua: scrubber.scrubUserAgent(log.UA || ''),
             status: log.STATUS || '',
             reason: log.REASON || ''
           });
         });
 
-        // Perform reverse DNS lookups in parallel
         const ipAddresses = Object.keys(ipMap);
-        const dnsResults = await Promise.allSettled(
-          ipAddresses.map(ip => dns.promises.reverse(ip).catch(() => []))
-        );
+
+        // Skip reverse DNS when scrubbing is enabled (hashed/truncated IPs can't be resolved)
+        let dnsResults;
+        if (scrubber.isEnabled()) {
+          dnsResults = ipAddresses.map(() => ({ status: 'fulfilled', value: [] }));
+        } else {
+          dnsResults = await Promise.allSettled(
+            ipAddresses.map(ip => dns.promises.reverse(ip).catch(() => []))
+          );
+        }
 
         const ips = ipAddresses.map((ip, i) => {
           const info = ipMap[ip];
@@ -1202,7 +1226,13 @@ async function handleRequest(req, res) {
       }
 
       const ip = url.pathname.split('/').pop();
-      
+
+      if (scrubber.isEnabled()) {
+        res.writeHead(403, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Threat intel lookups are disabled when data scrubbing is active' }));
+        return;
+      }
+
       // Validate IP format
       if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(ip)) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1577,11 +1607,11 @@ const httpServer = http.createServer((req, res) => {
   const hostname = req.headers.host || 'localhost';
   
   // Log HTTP request for tracking
-  console.log(`[${timestamp}] HTTP->HTTPS redirect for IP: ${clientIP}`);
+  console.log(`[${timestamp}] HTTP->HTTPS redirect for IP: ${scrubber.scrubIP(clientIP)}`);
   console.log(`[${timestamp}] Original HTTP URL: http://${hostname}${req.url}`);
-  
+
   // Create log entry for HTTP redirect
-  const logEntry = `${timestamp} | IP: ${clientIP} | Method: HTTP-REDIRECT | Host: ${hostname} | URL: ${req.url} | UA: ${req.headers['user-agent'] || 'unknown'} | Redirected to HTTPS\n`;
+  const logEntry = `${timestamp} | IP: ${scrubber.scrubIP(clientIP)} | Method: HTTP-REDIRECT | Host: ${hostname} | URL: ${req.url} | UA: ${scrubber.scrubUserAgent(req.headers['user-agent'] || 'unknown')} | Redirected to HTTPS\n`;
   fs.appendFile(config.logging.file, logEntry, (err) => {
     if (err) console.error('Error writing redirect log:', err);
   });
@@ -1627,10 +1657,10 @@ const httpServer = http.createServer((req, res) => {
   const redirectMessage = `HTTP Request Captured and Redirected!\n\n` +
     `Original HTTP URL: http://${hostname}${req.url}\n` +
     `Redirecting to HTTPS: https://${hostname}${req.url}\n\n` +
-    `Client IP: ${clientIP}\n` +
+    `Client IP: ${scrubber.scrubIP(clientIP)}\n` +
     `Timestamp: ${timestamp}\n` +
     `Method: ${req.method}\n` +
-    `User-Agent: ${req.headers['user-agent'] || 'unknown'}\n\n` +
+    `User-Agent: ${scrubber.scrubUserAgent(req.headers['user-agent'] || 'unknown')}\n\n` +
     `Note: This server requires HTTPS for security. You are being redirected automatically.`;
   
   res.end(redirectMessage);
